@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>galum_core</name>
+  <version>2.1.5</version>
+  <description>
+    galum_core
+  </description> 
+  <maintainer email="kunphakkapohn_c@cmu.ac.th">aingei</maintainer>
+  <license>Apache 2.0</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <!-- ROS 2 Dependencies -->
+  <depend>rclcpp</depend>
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>  <!-- Add std_msgs for Float32 messages -->
+
+  <!-- Camera Node Dependencies -->
+  <depend>cv_bridge</depend>
+  <depend>image_transport</depend>
+  <depend>tensorflow-lite</depend>
+
+  <!-- Python Dependencies -->
+  <depend>tf-transformations</depend>
+  <depend>python3-matplotlib</depend>  <!-- Add matplotlib dependency -->
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
