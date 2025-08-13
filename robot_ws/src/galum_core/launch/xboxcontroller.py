@@ -31,7 +31,7 @@ def generate_launch_description():
 
     joystick_control = Node(
         package="galum_core",
-        executable="joystick_node.py",
+        executable="xbox_node.py",
         name="Joystick_Node",
         # output="screen",
         namespace="",

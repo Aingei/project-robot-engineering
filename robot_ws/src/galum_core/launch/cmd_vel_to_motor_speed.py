@@ -83,10 +83,7 @@ class Cmd_vel_to_motor_speed(Node):
         self.create_subscription(
             Twist, '/galum/cmd_gripper_dig', self.cmd_gripper, qos_profile=qos.qos_profile_sensor_data # 10
         )
-        
-        self.create_subscription(
-            Twist, '/galum/cmd_macro', self.cmd_macro, qos_profile=qos.qos_profile_sensor_data # 10
-        )
+      
 
         self.create_subscription(
             Twist, '/galum/imu/pos_angle', self.get_robot_angle, qos_profile=qos.qos_profile_sensor_data # 10
@@ -106,82 +103,40 @@ class Cmd_vel_to_motor_speed(Node):
         self.controller.ConfigPIDF(kp = msg.data[0], ki= msg.data[1], kd=msg.data[2], kf=msg.data[3]) 
 
 
+    #Diff Drive 4 Wheels
     def cmd_vel(self, msg):
-
-        CurrentTime = time.time()
-        self.moveSpeed = msg.linear.y  
-        self.slideSpeed = msg.linear.x  
-        self.turnSpeed = msg.angular.z 
-
-
-        rotation = self.controller.Calculate(WrapRads(self.yaw_setpoint - self.yaw)) 
-
-        if self.turnSpeed != 0 or (CurrentTime - self.previous_manual_turn < 0.45):
-            rotation = self.turnSpeed
-            self.yaw_setpoint = self.yaw
-
-        if self.slideSpeed == 0 and self.moveSpeed  == 0 and self.turnSpeed == 0 and abs(rotation) < 0.2:
-            rotation = 0
-
-        self.previous_manual_turn = CurrentTime if self.turnSpeed != 0 else self.previous_manual_turn
-
-
-        D = max(abs(self.moveSpeed)+abs(self.slideSpeed)+abs(rotation), 1.0)
-        self.motor1Speed = float("{:.1f}".format((self.moveSpeed + self.slideSpeed + rotation) / D * self.maxSpeed))
-        self.motor2Speed = float("{:.1f}".format((self.moveSpeed - self.slideSpeed - rotation) / D * self.maxSpeed))
-        self.motor3Speed = float("{:.1f}".format((self.moveSpeed - self.slideSpeed + rotation) / D * self.maxSpeed))
-        self.motor4Speed = float("{:.1f}".format((self.moveSpeed + self.slideSpeed - rotation) / D * self.maxSpeed))
+        # รับคำสั่งความเร็ว
+        self.moveSpeed = msg.linear.x    # เดินหน้า/ถอยหลัง
+        self.slideSpeed = 0              # ไม่มีเลื่อนซ้าย-ขวาใน diff drive
+        self.turnSpeed = msg.angular.z   # หมุนรอบแกน z
         
+        rotation = self.turnSpeed
 
-    # def cmd_shoot(self, msg):
-           
-    #    if not self.macro_active:  
-    #        # self.motorshooter1Speed = abs(msg.linear.x - 1) * self.maxRPM 
-    #        # self.motorshooter2Speed = abs(msg.linear.x - 1) * self.maxRPM
-                
-    #        self.motorshooter1Speed = abs(msg.linear.x - 1) * self.maxSpeed 
-    #        self.motorshooter2Speed = abs(msg.linear.x - 1) * self.maxSpeed
+        # คำนวณความเร็วล้อซ้ายและขวา
+        left_speed = self.moveSpeed - (self.turnSpeed / 2.0) * rotation
+        right_speed = self.moveSpeed + (self.turnSpeed / 2.0) * rotation
 
-            
-    #        self.motorshooter3Speed = abs(msg.linear.z - 1) * self.maxSpeed
-    #        self.motorshooter3Speed += msg.angular.x * self.maxSpeed
+        # ปรับสเกลความเร็ว (normalize) ถ้าจำเป็น
+        max_wheel_speed = max(abs(left_speed), abs(right_speed), 1.0)
+        left_speed = left_speed / max_wheel_speed * self.maxSpeed
+        right_speed = right_speed / max_wheel_speed * self.maxSpeed
 
-    #     if self.motorshooter3Speed >= 1023.0:
-    #             self.motorshooter3Speed = 1023.0
+        # กำหนดความเร็วล้อ 4 ล้อ (ล้อซ้าย 2 ล้อ, ล้อขวา 2 ล้อ)
+        self.motor1Speed = float("{:.1f}".format(left_speed))   # ล้อซ้ายหน้า
+        self.motor2Speed = float("{:.1f}".format(left_speed))   # ล้อซ้ายหลัง
+        self.motor3Speed = float("{:.1f}".format(right_speed))  # ล้อขวาหน้า
+        self.motor4Speed = float("{:.1f}".format(right_speed))  # ล้อขวาหลัง
 
-
-
-    # def cmd_macro(self, msg):
-    #     if msg.linear.x == 1 :
-            
-    #         self.macro_active = True
-    #         self.motorshooter1Speed = -580.0    #Upper
-    #         self.motorshooter2Speed = 740.0     #Lower
-    #     #  -580 740 --> -1200 4400
-    #     #  -580 740
-            
-    #         # self.motorshooter1Speed = 800.0     #Upper
-    #         # self.motorshooter2Speed = 800.0     #Lower
-         
-    #     else:
-    #         self.macro_active = False
-         
             
     def sendData(self):
         motorspeed_msg = Twist()
-        # motorshooter_msg = Twist()
        
         motorspeed_msg.linear.x = float(self.motor1Speed)
         motorspeed_msg.linear.y = float(self.motor2Speed)
         motorspeed_msg.angular.x = float(self.motor3Speed)
         motorspeed_msg.angular.y = float(self.motor4Speed)
 
-        # motorshooter_msg.linear.x = float(self.motorshooter1Speed)
-        # motorshooter_msg.linear.y = float(self.motorshooter2Speed)
-        # motorshooter_msg.linear.z = float(self.motorshooter3Speed)
-
-
-        # self.send_shoot_speed.publish(motorshooter_msg)
+        
         self.send_robot_speed.publish(motorspeed_msg)
 
 

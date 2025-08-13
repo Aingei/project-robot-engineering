@@ -32,7 +32,6 @@ class Cmd_vel_to_motor_speed(Node):
         self.turnSpeed: float = 0.0
 
         self.maxSpeed : float = 1023.0
-        self.shootmaxSpeed : float = 1023.0
         self.motor1Speed : float = 0
         self.motor2Speed : float = 0
         
@@ -46,28 +45,11 @@ class Cmd_vel_to_motor_speed(Node):
         self.controller = Controller(kp = 1.0, ki = 0.05, kd = 0.001, errorTolerance= To_Radians(0.5), i_min= -1, i_max= 1)
         
         
+        # self.macro_active = False
+        
 
-        self.motorshooter1Speed : float = 0
-        self.motorshooter2Speed : float = 0
-        self.motorshooter3Speed : float = 0
-
-        self.motornadeem : float = 0
-        
-        
-        self.macro_active = False
-        
- 
-        
         self.send_robot_speed = self.create_publisher(
             Twist, "/galum/cmd_move/rpm", qos_profile=qos.qos_profile_system_default
-        )
-
-        self.send_shoot_speed = self.create_publisher(
-            Twist, "/galum/cmd_shoot/rpm", qos_profile=qos.qos_profile_system_default
-        )
-
-        self.send_nadeem_speed = self.create_publisher(
-            Twist, "/galum/cmd_nadeem/rpm", qos_profile=qos.qos_profile_system_default
         )
 
         self.create_subscription(
@@ -75,24 +57,12 @@ class Cmd_vel_to_motor_speed(Node):
         )
 
         self.create_subscription(
-            Twist, '/galum/cmd_shoot', self.cmd_shoot, qos_profile=qos.qos_profile_sensor_data # 10
+            Float32MultiArray, '/galum/pid/rotate', self.get_pid, qos_profile=qos.qos_profile_sensor_data # 10
         )
-        
-        self.create_subscription(
-            Twist, '/galum/cmd_macro', self.cmd_macro, qos_profile=qos.qos_profile_sensor_data # 10
-        )
-        self.create_subscription(
-            Twist, '/galum/cmd_nadeem', self.cmd_nadeem, qos_profile=qos.qos_profile_sensor_data #10
-        )
-        
-        self.create_subscription(
-              Float32MultiArray, '/galum/pid/rotate', self.get_pid, qos_profile=qos.qos_profile_sensor_data # 10
-          )
         
         self.create_subscription(
             Twist, '/galum/imu/pos_angle', self.get_robot_angle, qos_profile=qos.qos_profile_sensor_data # 10
         )
-
 
 
         self.sent_data_timer = self.create_timer(0.01, self.sendData)
@@ -144,64 +114,15 @@ class Cmd_vel_to_motor_speed(Node):
         if self.motor2Speed >= self.maxSpeed:
             self.motor2Speed = self.maxSpeed    
         # self.rotation = rotation * self.maxSpeed  # Apply track width to rotation speed
-
-
-            
-        
-
-
-
-    def cmd_shoot(self, msg):
-        if not self.macro_active:  # Only update if macro is inactive
-            self.motorshooter1Speed = abs(msg.linear.x - 1) * self.shootmaxSpeed
-            self.motorshooter2Speed = abs(msg.linear.x - 1) * self.shootmaxSpeed
-        
-
-        self.motorshooter3Speed = abs(msg.linear.z - 1) * self.maxSpeed
-        self.motorshooter3Speed += msg.angular.x * self.maxSpeed
-
-        if self.motorshooter3Speed >= 1023.0:
-            self.motorshooter3Speed = 1023.0 
-
-    def cmd_nadeem(self, msg):
-        if not self.macro_active:  # Only update if macro is inactive
-            self.motornadeem = abs(msg.linear.x - 1) * self.maxSpeed
-            
-
-    def cmd_macro(self, msg):
-        if msg.linear.x == 1 :
-            
-            self.macro_active = True
-            self.motorshooter1Speed = 810.0     #Upper
-            self.motorshooter2Speed = 810.0     #Lower
-         
-        else:
-            self.macro_active = False
-         
-            
+ 
     def sendData(self):
         motorspeed_msg = Twist()
-        motorshooter_msg = Twist()
-        motornadeem_msg = Twist()
-
        
         motorspeed_msg.linear.x = float(self.motor1Speed) #Left
         motorspeed_msg.linear.y = float(self.motor2Speed) #Right
 
-
-        motorshooter_msg.linear.x = float(self.motorshooter1Speed)
-        motorshooter_msg.linear.y = float(self.motorshooter2Speed)
-        motorshooter_msg.linear.z = float(self.motorshooter3Speed)
-
-        motornadeem_msg.linear.x = float(self.motornadeem)
-        motornadeem_msg.angular.x = float(self.yaw)
-
-
-        self.send_shoot_speed.publish(motorshooter_msg)
         self.send_robot_speed.publish(motorspeed_msg)
-        self.send_nadeem_speed.publish(motornadeem_msg)
-
-
+       
 
 def main():
     rclpy.init()
