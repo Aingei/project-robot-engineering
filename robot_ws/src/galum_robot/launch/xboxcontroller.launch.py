@@ -11,7 +11,7 @@ def generate_launch_description():
     ld = LaunchDescription()
 
     motor_config = os.path.join(
-        get_package_share_directory('galum_core'),
+        get_package_share_directory('galum_robot'),
         'config',
         'motor_config.yaml'
     )
@@ -30,17 +30,17 @@ def generate_launch_description():
     )
 
     joystick_control = Node(
-        package="galum_core",
-        executable="joystick_node.py",
+        package="galum_robot",
+        executable="xbox_node",
         name="Joystick_Node",
         # output="screen",
         namespace="",
     )
     
     
-    cmd_vel_to_motor_speed = Node(
-        package="galum_core",
-        executable="cmd_vel_to_motor_speed.py",
+    galum_speed = Node(
+        package="galum_robot",
+        executable="galum_speed",
         name="Cmd_Vel_To_Rpm",
         # output="screen",
         namespace="",
@@ -48,7 +48,7 @@ def generate_launch_description():
     )
     
     # joy_auto = Node(
-    #     package="galum_core",
+    #     package="galum_robot",
     #     executable="joystick_control_3sec.py",
     #     name="joy_auto",
     #     # output="screen",
@@ -58,6 +58,6 @@ def generate_launch_description():
     ld.add_action(joy)
     ld.add_action(joystick_control)
     # ld.add_action(joy_auto)
-    # ld.add_action(cmd_vel_to_motor_speed)
+    # ld.add_action(galum_speed)
 
     return ld
