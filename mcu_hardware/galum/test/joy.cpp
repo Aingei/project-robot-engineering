@@ -28,22 +28,10 @@ ESP32Encoder encoderRight;
 
 #define PWM_FREQ 5000
 #define PWM_RESOLUTION 8
-// #define PWM_CHANNEL_AIN1 0
-// #define PWM_CHANNEL_AIN2 1
-// #define PWM_CHANNEL_BIN1 2
-// #define PWM_CHANNEL_BIN2 3
-
-// Left wheels
-#define PWM_CHANNEL_FL1 0
-#define PWM_CHANNEL_FL2 1
-#define PWM_CHANNEL_BL1 2
-#define PWM_CHANNEL_BL2 3
-
-// Right wheels
-#define PWM_CHANNEL_FR1 4
-#define PWM_CHANNEL_FR2 5
-#define PWM_CHANNEL_BR1 6
-#define PWM_CHANNEL_BR2 7
+#define PWM_CHANNEL_AIN1 0
+#define PWM_CHANNEL_AIN2 1
+#define PWM_CHANNEL_BIN1 2
+#define PWM_CHANNEL_BIN2 3
 
 
 // -------- Robot geometry --------
@@ -108,54 +96,20 @@ void setup() {
 
   bno.setExtCrystalUse(true);
 
-  // pinMode(AIN1, OUTPUT);
-  // pinMode(AIN2, OUTPUT);
-  // pinMode(BIN1, OUTPUT);
-  // pinMode(BIN2, OUTPUT);
+  pinMode(AIN1, OUTPUT);
+  pinMode(AIN2, OUTPUT);
+  pinMode(BIN1, OUTPUT);
+  pinMode(BIN2, OUTPUT);
   
-  pinMode(FL1, OUTPUT);
-  pinMode(FL2, OUTPUT);
-  pinMode(FR1, OUTPUT);
-  pinMode(FR2, OUTPUT);
-  pinMode(BL1, OUTPUT);
-  pinMode(BL2, OUTPUT);
-  pinMode(BR1, OUTPUT);
-  pinMode(BR2, OUTPUT);
+  ledcSetup(PWM_CHANNEL_AIN1, PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(PWM_CHANNEL_AIN2, PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(PWM_CHANNEL_BIN1, PWM_FREQ, PWM_RESOLUTION);
+  ledcSetup(PWM_CHANNEL_BIN2, PWM_FREQ, PWM_RESOLUTION);
 
-  // ledcSetup(PWM_CHANNEL_AIN1, PWM_FREQ, PWM_RESOLUTION);
-  // ledcSetup(PWM_CHANNEL_AIN2, PWM_FREQ, PWM_RESOLUTION);
-  // ledcSetup(PWM_CHANNEL_BIN1, PWM_FREQ, PWM_RESOLUTION);
-  // ledcSetup(PWM_CHANNEL_BIN2, PWM_FREQ, PWM_RESOLUTION);
-
-  // ----------------- Setup Left Wheels -----------------
-  ledcSetup(PWM_CHANNEL_FL1, PWM_FREQ, PWM_RESOLUTION);
-  ledcSetup(PWM_CHANNEL_FL2, PWM_FREQ, PWM_RESOLUTION);
-  ledcSetup(PWM_CHANNEL_BL1, PWM_FREQ, PWM_RESOLUTION);
-  ledcSetup(PWM_CHANNEL_BL2, PWM_FREQ, PWM_RESOLUTION);
-
-  // ----------------- Setup Right Wheels -----------------
-  ledcSetup(PWM_CHANNEL_FR1, PWM_FREQ, PWM_RESOLUTION);
-  ledcSetup(PWM_CHANNEL_FR2, PWM_FREQ, PWM_RESOLUTION);
-  ledcSetup(PWM_CHANNEL_BR1, PWM_FREQ, PWM_RESOLUTION);
-  ledcSetup(PWM_CHANNEL_BR2, PWM_FREQ, PWM_RESOLUTION);
-
-
-  // ledcAttachPin(AIN1, PWM_CHANNEL_AIN1);
-  // ledcAttachPin(AIN2, PWM_CHANNEL_AIN2);
-  // ledcAttachPin(BIN1, PWM_CHANNEL_BIN1);
-  // ledcAttachPin(BIN2, PWM_CHANNEL_BIN2);
-
-  // Left wheels
-  ledcAttachPin(AIN1, PWM_CHANNEL_FL1);
-  ledcAttachPin(AIN2, PWM_CHANNEL_FL2);
-  ledcAttachPin(BIN1, PWM_CHANNEL_BL1);
-  ledcAttachPin(BIN2, PWM_CHANNEL_BL2);
-
-  // Right wheels (สมมติใช้ pins อื่นของ ESP32)
-  ledcAttachPin(PIN_FR1, PWM_CHANNEL_FR1);
-  ledcAttachPin(PIN_FR2, PWM_CHANNEL_FR2);
-  ledcAttachPin(PIN_BR1, PWM_CHANNEL_BR1);
-  ledcAttachPin(PIN_BR2, PWM_CHANNEL_BR2);
+  ledcAttachPin(AIN1, PWM_CHANNEL_AIN1);
+  ledcAttachPin(AIN2, PWM_CHANNEL_AIN2);
+  ledcAttachPin(BIN1, PWM_CHANNEL_BIN1);
+  ledcAttachPin(BIN2, PWM_CHANNEL_BIN2);
 
 }
 
