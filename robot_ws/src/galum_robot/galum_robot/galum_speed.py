@@ -48,9 +48,9 @@ class galum_speed(Node):
             Twist, '/galum/cmd_move', self.cmd_vel, qos_profile=qos.qos_profile_system_default
         )
         
-        self.create_subscription(
-            Twist, '/galum/imu/pos_angle', self.get_robot_angle, qos_profile=qos.qos_profile_sensor_data # 10
-        )
+        # self.create_subscription(
+        #     Twist, '/galum/imu/pos_angle', self.get_robot_angle, qos_profile=qos.qos_profile_sensor_data # 10
+        # )
 
         self.sent_data_timer = self.create_timer(0.01, self.sendData) 
 

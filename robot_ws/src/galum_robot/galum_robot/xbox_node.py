@@ -36,33 +36,6 @@ class Gamepad:
         self.PressedRightAnalog : float = 0.0   # 12: Pressed Right Analog
 
         #----------------------------------------------------------------
-        
-        self.auto_aim_bool: bool =False
-        self.dribble: bool = False 
-        self.toggle_shoot_bool : bool = False 
-        self.toggle_pass_bool : bool = False
-        self.toggle_pass_motor_bool : bool = False
-        self.toggle_shoot_2_bool : bool = False
-        self.toggle_encoder_bool : bool = False
-
-        self.previous_triangle_state = False
-        self.previous_circle_state = False
-        self.previous_cross_state = False
-        self.previous_square_state = False
-        self.previous_l1_state = False
-        self.previous_r1_state = False
-        self.previous_PressedRightAnalog_state = False
-
-
-
-        self.last_macro_button = None  # Stores 'shoot', 'pass', 'dribble', 'auto_aim', 'pass_motor', 'shoot2'
-
-
-    def update_toggle_encoder(self):
-        if self.PressedRightAnalog and not self.previous_PressedRightAnalog_state:
-            self.toggle_encoder_bool = not self.toggle_encoder_bool
-
-        self.previous_PressedRightAnalog_state = self.PressedRightAnalog
 
 
 class Joystick(Node):
@@ -70,16 +43,16 @@ class Joystick(Node):
         super().__init__("joystick")
 
         self.pub_move = self.create_publisher(
-            Twist, "/galum/cmd_move", qos_profile=qos.qos_profile_system_default
+            Twist, "/galum/cmd_vel", qos_profile=qos.qos_profile_system_default
         )
         
         self.pub_macro = self.create_publisher(
-            Twist, "/galum/cmd_step", qos_profile=qos.qos_profile_system_default
+            Twist, "/galum/stepper_angle", qos_profile=qos.qos_profile_system_default
         )
 
-        self.pub_servo = self.create_publisher(
-            Twist, "/galum/cmd_servo", qos_profile=qos.qos_profile_system_default
-        )
+        # self.pub_servo = self.create_publisher(
+        #     Twist, "/galum/cmd_servo", qos_profile=qos.qos_profile_system_default
+        # )
 
         self.pub_encoder = self.create_publisher(
             Twist, "/galum/cmd_encoder", qos_profile=qos.qos_profile_system_default
@@ -122,45 +95,21 @@ class Joystick(Node):
         self.gamepad.PressedLeftAnalog  = float(msg.buttons[9])    # 11:
         self.gamepad.PressedRightAnalog = float(msg.buttons[10])    # 12:
         
-        
-        #Macro-----------------------------------------------------------
-        
-        
-        self.gamepad.update_toggle_encoder()
+     
+        if self.gamepad.button_logo:
+            self.gamepad.reset_toggles()
+
+
     
-        
-        # if self.gamepad.button_logo:
-        #     self.gamepad.reset_toggles()
-
-
     def sendData(self):
         
         cmd_vel_move = Twist()
-        cmd_servo = Twist()
-        cmd_encoder = Twist()
 
-
-        cmd_vel_move.linear.x = float(self.gamepad.lx * self.maxspeed)
-        cmd_vel_move.linear.y = float(self.gamepad.ly * self.maxspeed)
-        cmd_vel_move.angular.z = float(self.gamepad.rx * self.maxspeed)
+        cmd_vel_move.linear.x = float(self.gamepad.ly * self.maxspeed)
+        cmd_vel_move.angular.z = float(self.gamepad.rx * self.maxspeed * 3.0)
         
-        
-        if self.gamepad.button_share:
-            cmd_servo.linear.x = float(1.0)  #Closed Servo
-        
-        if self.gamepad.button_option:
-            cmd_servo.linear.x = float(2.0)  #Opened Servo
-
-
-        if self.gamepad.toggle_encoder_bool:
-            cmd_encoder.linear.x = 2.0 #RPM
-        else:
-            cmd_encoder.linear.x = 1.0 #Bit
-        
-        self.pub_encoder.publish(cmd_encoder)
-        self.pub_servo.publish(cmd_servo)
         self.pub_move.publish(cmd_vel_move)
-       
+
 
 def main():
     rclpy.init()

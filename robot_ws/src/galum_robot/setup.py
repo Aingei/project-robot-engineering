@@ -24,7 +24,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'cmd_vel_to_motor_speed = galum_robot.cmd_vel_to_motor_speed:main',
+            'galum_speed = galum_robot.galum_speed:main',
             'joystick_node = galum_robot.joystick_node:main',
             'xbox_node = galum_robot.xbox_node:main',
         ],
