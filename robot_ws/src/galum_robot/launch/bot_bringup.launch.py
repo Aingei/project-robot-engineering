@@ -26,9 +26,16 @@ def generate_launch_description():
         namespace="",
         # parameters=[motor_config], #Testing
     )
+    
+    node_microros_1 = Node(
+        package="micro_ros_agent",
+        executable="micro_ros_agent",
+        output="screen",
+        arguments=["serial", "--dev", "/dev/ttyUSB0"],
+    )
 
     # Add actions to the launch description
-    ld.add_action(microros_launch)
+    ld.add_action(node_microros_1)
     ld.add_action(galum_speed)
 
     return ld

@@ -40,7 +40,7 @@ class galum_speed(Node):
         self.previous_manual_turn = time.time()
 
         self.send_robot_speed = self.create_publisher(
-            Twist, "/galum/cmd_vel/rpm", qos_profile=qos.qos_profile_system_default
+            Twist, "/galum/cmd_move/rpm", qos_profile=qos.qos_profile_system_default
         )
 
         self.create_subscription(
@@ -56,7 +56,7 @@ class galum_speed(Node):
 
     def cmd_vel(self, msg):
         
-        linear_vel = msg.linear.y    # forward/backward
+        linear_vel = msg.linear.x    # forward/backward
         angular_vel = msg.angular.z  # turning rate
         angular_vel = angular_vel * 5
 

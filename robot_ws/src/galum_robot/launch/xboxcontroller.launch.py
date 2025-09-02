@@ -47,17 +47,17 @@ def generate_launch_description():
         # parameters=[motor_config], #Testing
     )
     
-    # joy_auto = Node(
-    #     package="galum_robot",
-    #     executable="joystick_control_3sec.py",
-    #     name="joy_auto",
-    #     # output="screen",
-    #     namespace="",
-    # )
+    node_microros_1 = Node(
+        package="micro_ros_agent",
+        executable="micro_ros_agent",
+        output="screen",
+        arguments=["serial", "--dev", "/dev/ttyUSB0"],
+    )
     
+    ld.add_action(node_microros_1)
     ld.add_action(joy)
     ld.add_action(joystick_control)
     # ld.add_action(joy_auto)
-    # ld.add_action(galum_speed)
+    ld.add_action(galum_speed)
 
     return ld
