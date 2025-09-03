@@ -37,6 +37,8 @@ class galum_speed(Node):
         
         self.motor1Speed : float = 0
         self.motor2Speed : float = 0
+        self.motor3Speed : float = 0
+        self.motor4Speed : float = 0
 
         self.previous_manual_turn = time.time()
 

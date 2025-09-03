@@ -37,6 +37,13 @@ def generate_launch_description():
         namespace="",
     )
     
+    stepper_simple = Node(
+        package="galum_robot",
+        executable="stepper_simple",
+        name="stepper_node",
+        # output="screen",
+        namespace="",
+    )
     
     galum_speed = Node(
         package="galum_robot",
@@ -59,5 +66,6 @@ def generate_launch_description():
     ld.add_action(joystick_control)
     # ld.add_action(joy_auto)
     ld.add_action(galum_speed)
+    ld.add_action(stepper_simple)
 
     return ld

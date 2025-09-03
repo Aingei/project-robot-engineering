@@ -28,6 +28,8 @@ setup(
             'galum_speed = galum_robot.galum_speed:main',
             'joystick_node = galum_robot.joystick_node:main',
             'xbox_node = galum_robot.xbox_node:main',
+            'stepper_simple = galum_robot.stepper_simple:main',
+
         ],
     },
 )

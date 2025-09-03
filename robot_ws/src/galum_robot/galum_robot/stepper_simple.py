@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
+import threading
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Bool
-from time import sleep_us
+from std_msgs.msg import Float32MultiArray
 from geometry_msgs.msg import Twist
 from rclpy import qos
+
+import time 
+import math
 
 # STEPS_PER_REV = 200
 # MICROSTEP = 16
 # DELAY = 0.001 
 
-class StepperSimple(Node):
+class stepper_simple(Node):
+    
+    
     def __init__(self):
         super().__init__("stepper_simple")
         
-        self.stepper_angle = 0.0
         
+        self.stepper_angle : float = 0
+        
+        self.previous_manual_turn = time.time()
 
         self.send_robot_stepper = self.create_publisher(
             Twist, "/galum/stepper/angle", qos_profile=qos.qos_profile_system_default
@@ -26,7 +33,7 @@ class StepperSimple(Node):
         )
         
         # timer เรียกทุก 0.5 วิ → หมุน Stepper
-        self.create_timer(0.5, self.auto_rotate)
+        # self.create_timer(0.5, self.auto_rotate)
 
         self.sent_data_timer = self.create_timer(0.01, self.sendData) 
         
@@ -37,7 +44,7 @@ class StepperSimple(Node):
         if msg.linear.x == 1:               # Closed Stepper
             self.stepper_angle = float(0.0)
 
-        if msg.linear.x == 2:               # Opened Stepper
+        elif msg.linear.x == 2:               # Opened Stepper
             self.stepper_angle = float(90.0)
             
     def sendData(self):
@@ -50,7 +57,7 @@ class StepperSimple(Node):
          
 def main(args=None):
     rclpy.init()
-    sub = steppertest()
+    sub = stepper_simple()
     rclpy.spin(sub)
     rclpy.shutdown()
 

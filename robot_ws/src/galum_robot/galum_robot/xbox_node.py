@@ -23,8 +23,8 @@ class Gamepad:
         
         #Buttons:-------------------------------------------------------
         
-        self.button_A : float = 0.0         # 0: A
-        self.button_B : float = 0.0         # 1: B
+        self.button_cross : float = 0.0         # 0: A
+        self.button_circle : float = 0.0         # 1: B
         self.button_triangle : float = 0.0      # 2: X
         self.button_square : float = 0.0        # 3: Y
         self.l1 : float = 0.0                   # 4: LB
@@ -46,7 +46,7 @@ class Joystick(Node):
             Twist, "/galum/cmd_move", qos_profile=qos.qos_profile_system_default
         )
         
-        self.pub_macro = self.create_publisher(
+        self.pub_stepper = self.create_publisher(
             Twist, "/galum/stepper", qos_profile=qos.qos_profile_system_default
         )
 
@@ -107,10 +107,10 @@ class Joystick(Node):
         cmd_vel_move.linear.x = float(self.gamepad.ly * self.maxspeed)
         cmd_vel_move.angular.z = float(self.gamepad.rx * self.maxspeed)
         
-        if self.gamepad.button_A:
+        if self.gamepad.button_cross:
             cmd_stepper.linear.x = float(1.0)  #Closed Servo
         
-        if self.gamepad.button_B:
+        if self.gamepad.button_circle:
             cmd_stepper.linear.x = float(2.0)  #Opened Servo
         
         
