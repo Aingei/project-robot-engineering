@@ -18,12 +18,12 @@ class StepperSimple(Node):
         self.current_steps = 0
         self.current_angle = 0.0
 
-        self.send_robot_speed = self.create_publisher(
-            Twist, "/galum/stepper_angle", qos_profile=qos.qos_profile_system_default
+        self.send_robot_stepper = self.create_publisher(
+            Twist, "/galum/stepper/angle", qos_profile=qos.qos_profile_system_default
         )
         
         self.create_subscription(
-            Twist, '/galum/stepper', self.stepper_angle, qos_profile=qos.qos_profile_system_default
+            Twist, '/galum/stepper', self.rotate_stepper, qos_profile=qos.qos_profile_system_default
         )
         
         # timer เรียกทุก 0.5 วิ → หมุน Stepper
@@ -54,7 +54,7 @@ class StepperSimple(Node):
     def sendData(self):
         msg = Twist()
         msg.linear.x = self.current_angle
-        self.send_robot_speed.publish(msg)
+        self.send_robot_stepper.publish(msg)
         self.get_logger().debug(f"Current angle: {self.current_angle} deg")
 
 def main(args=None):

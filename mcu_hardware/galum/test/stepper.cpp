@@ -3,7 +3,7 @@
 
 // กำหนดขาของ Stepper Motor (มอเตอร์เดียว)
 #define STEP_PIN 32
-#define DIR_PIN  25
+#define DIR_PIN  17
 
 void moveMotor(bool clockwise, int steps)
 {

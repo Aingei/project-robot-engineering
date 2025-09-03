@@ -23,8 +23,8 @@ class Gamepad:
         
         #Buttons:-------------------------------------------------------
         
-        self.button_cross : float = 0.0         # 0: A
-        self.button_circle : float = 0.0        # 1: B
+        self.button_A : float = 0.0         # 0: A
+        self.button_B : float = 0.0         # 1: B
         self.button_triangle : float = 0.0      # 2: X
         self.button_square : float = 0.0        # 3: Y
         self.l1 : float = 0.0                   # 4: LB
@@ -47,7 +47,7 @@ class Joystick(Node):
         )
         
         self.pub_macro = self.create_publisher(
-            Twist, "/galum/stepper_angle", qos_profile=qos.qos_profile_system_default
+            Twist, "/galum/stepper", qos_profile=qos.qos_profile_system_default
         )
 
         # self.pub_servo = self.create_publisher(
@@ -102,12 +102,20 @@ class Joystick(Node):
     def sendData(self):
         
         cmd_vel_move = Twist()
+        cmd_stepper = Twist()
 
         cmd_vel_move.linear.x = float(self.gamepad.ly * self.maxspeed)
         cmd_vel_move.angular.z = float(self.gamepad.rx * self.maxspeed)
         
+        if self.gamepad.button_A:
+            cmd_stepper.linear.x = float(1.0)  #Closed Servo
+        
+        if self.gamepad.button_B:
+            cmd_stepper.linear.x = float(2.0)  #Opened Servo
+        
+        
         self.pub_move.publish(cmd_vel_move)
-
+        self.pub_stepper.publish(cmd_stepper)
 
 def main():
     rclpy.init()
