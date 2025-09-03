@@ -98,7 +98,6 @@ class Joystick(Node):
         if self.gamepad.button_logo:
             self.gamepad.reset_toggles()
 
-
     
     def sendData(self):
         
