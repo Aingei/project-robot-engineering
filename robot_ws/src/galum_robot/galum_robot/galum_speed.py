@@ -24,7 +24,6 @@ class galum_speed(Node):
 
     def __init__(self):
         super().__init__("galum_speed")
-
         
         self.moveSpeed: float = 0.0
         self.turnSpeed: float = 0.0

@@ -1,5 +1,6 @@
 #include <Arduino.h>
 
+
 // กำหนดขาของ Stepper Motor (มอเตอร์เดียว)
 #define STEP_PIN 32
 #define DIR_PIN  25

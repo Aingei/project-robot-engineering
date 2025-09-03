@@ -45,7 +45,6 @@ class StepperSimple(Node):
         self.current_steps = target_steps
         self.current_angle = (self.current_steps * 360.0) / (STEPS_PER_REV * MICROSTEP)
     
-    
     def auto_rotate(self):
         self.rotate_stepper(self.target_angle)
         

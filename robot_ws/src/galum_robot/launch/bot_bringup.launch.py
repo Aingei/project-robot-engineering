@@ -11,7 +11,6 @@ def generate_launch_description():
     # Define the path to the launch file directory
     launch_file_dir = os.path.join(get_package_share_directory('galum_robot'), 'launch')
     
-    
     # Include microros.launch.py
     microros_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -27,7 +26,6 @@ def generate_launch_description():
         namespace="",
         # parameters=[motor_config], #Testing
     )
-
 
     # Add actions to the launch description
     ld.add_action(microros_launch)

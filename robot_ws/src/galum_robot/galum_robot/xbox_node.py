@@ -65,7 +65,6 @@ class Joystick(Node):
         self.gamepad = Gamepad()
         self.maxspeed : float = 1.0
         
-
         self.sent_data_timer = self.create_timer(0.01, self.sendData)
 
     def joy(self, msg):
