@@ -34,6 +34,7 @@ class galum_speed(Node):
         self.maxSpeed : int = 1023.0 # pwm
         self.maxRPM : int = 150
         self.max_linear_speed = 3.0  # m/s max
+        
         self.motor1Speed : float = 0
         self.motor2Speed : float = 0
 
@@ -84,7 +85,6 @@ class galum_speed(Node):
         motorspeed_msg.linear.y = float(self.motor2Speed) #left rear
         motorspeed_msg.angular.x = float(self.motor3Speed) #right front
         motorspeed_msg.angular.y = float(self.motor4Speed) #right rear
-        
         
         self.send_robot_speed.publish(motorspeed_msg)
        
