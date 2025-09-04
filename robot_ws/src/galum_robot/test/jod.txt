@@ -1,0 +1,3 @@
+http://172.20.10.3:5000/video --> web
+
+python3 camera_stream.py --> run camera

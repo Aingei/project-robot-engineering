@@ -26,6 +26,7 @@ setup(
     entry_points={
         'console_scripts': [
             'galum_speed = galum_robot.galum_speed:main',
+            'showcamera = galum_robot.showcamera:main',
             'joystick_node = galum_robot.joystick_node:main',
             'xbox_node = galum_robot.xbox_node:main',
             'stepper_simple = galum_robot.stepper_simple:main',
