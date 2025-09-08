@@ -17,6 +17,9 @@
 #include <std_msgs/msg/int16_multi_array.h>
 #include <geometry_msgs/msg/twist.h>
 
+// #include <encoder.h>
+#include "../config/galum_move.h"
+
 
 #define RCCHECK(fn)                  \
     {                                \
@@ -49,18 +52,6 @@
     } while (0)
 
 
-#define AIN1 33
-#define AIN2 25
-#define BIN1 26
-#define BIN2 27
-
-
-#define PWM_FREQ 5000        // 5 kHz PWM frequency
-#define PWM_RESOLUTION 8     // 8-bit resolution
-#define PWM_CHANNEL_AIN1 0
-#define PWM_CHANNEL_AIN2 1
-#define PWM_CHANNEL_BIN1 2
-#define PWM_CHANNEL_BIN2 3
 //------------------------------ < Define > -------------------------------------//
 
 rcl_publisher_t debug_motor_publisher;
@@ -88,9 +79,6 @@ enum states
     AGENT_CONNECTED,
     AGENT_DISCONNECTED
 } state;
-
-
-
 
 
 //------------------------------ < Fuction Prototype > ------------------------------//
@@ -124,11 +112,20 @@ ledcSetup(PWM_CHANNEL_AIN1, PWM_FREQ, PWM_RESOLUTION);
 ledcSetup(PWM_CHANNEL_AIN2, PWM_FREQ, PWM_RESOLUTION);
 ledcSetup(PWM_CHANNEL_BIN1, PWM_FREQ, PWM_RESOLUTION);
 ledcSetup(PWM_CHANNEL_BIN2, PWM_FREQ, PWM_RESOLUTION);
+ledcSetup(PWM_CHANNEL_CIN1, PWM_FREQ, PWM_RESOLUTION);
+ledcSetup(PWM_CHANNEL_CIN2, PWM_FREQ, PWM_RESOLUTION);
+ledcSetup(PWM_CHANNEL_DIN1, PWM_FREQ, PWM_RESOLUTION);
+ledcSetup(PWM_CHANNEL_DIN2, PWM_FREQ, PWM_RESOLUTION);
 
 ledcAttachPin(AIN1, PWM_CHANNEL_AIN1);
 ledcAttachPin(AIN2, PWM_CHANNEL_AIN2);
 ledcAttachPin(BIN1, PWM_CHANNEL_BIN1);
 ledcAttachPin(BIN2, PWM_CHANNEL_BIN2);
+ledcAttachPin(CIN1, PWM_CHANNEL_CIN1);
+ledcAttachPin(CIN2, PWM_CHANNEL_CIN2);
+ledcAttachPin(DIN1, PWM_CHANNEL_DIN1);
+ledcAttachPin(DIN2, PWM_CHANNEL_DIN2);
+
 
 }
 
@@ -182,15 +179,10 @@ void twistCallback(const void *msgin)
 }
 
 
-
-
 bool createEntities()
 {
 
-
-
     allocator = rcl_get_default_allocator();
-
 
     geometry_msgs__msg__Twist__init(&debug_motor_msg);
 
@@ -201,7 +193,7 @@ bool createEntities()
     rclc_support_init_with_options(&support, 0, NULL, &init_options, &allocator);
 
 
-    RCCHECK(rclc_node_init_default(&node, "white_slot_shooter_node", "", &support));
+    RCCHECK(rclc_node_init_default(&node, "galum_shooter_node", "", &support));
 
     RCCHECK(rclc_publisher_init_best_effort(
         &debug_motor_publisher,
@@ -214,9 +206,6 @@ bool createEntities()
         &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
         "/galum/cmd_move/rpm"));
-
-
-
 
 
     const unsigned int control_timeout = 20;
@@ -258,51 +247,90 @@ bool destroyEntities()
 
 
 
+void Move() {
+    float v = motor_msg.linear.x;      // m/s
+    float omega = motor_msg.angular.z; // rad/s
 
-void Move(){
-    float motor1Speed = motor_msg.linear.x;
-    float motor2Speed = motor_msg.linear.y;
+    // Convert to wheel linear velocities
+    // ล้อหน้า-หลัง สมมติ 4 ล้อ Differential
+    float v_left  = v - (omega * wheel_separation / 2.0);
+    float v_right = v + (omega * wheel_separation / 2.0);
 
-    // debug_motor_msg.linear.x = motor1Speed;
-    // debug_motor_msg.linear.y = motor2Speed;
+    // Convert linear velocity to RPM
+    float rpm_left  = (v_left  / (2 * M_PI * wheel_radius)) * 60.0;
+    float rpm_right = (v_right / (2 * M_PI * wheel_radius)) * 60.0;
 
-    float max_rpm = 150.0;
+    // Clamp RPM
+    rpm_left  = constrain(rpm_left,  -max_rpm, max_rpm);
+    rpm_right = constrain(rpm_right, -max_rpm, max_rpm);
 
-uint8_t duty1 = (uint8_t)((fabs(motor1Speed) / max_rpm) * 255.0);
-uint8_t duty2 = (uint8_t)((fabs(motor2Speed) / max_rpm) * 255.0);
+    // Convert to duty cycle 0-255
+    uint8_t duty_left_front  = (uint8_t)((fabs(rpm_left)  / max_rpm) * 255.0);
+    uint8_t duty_left_back   = (uint8_t)((fabs(rpm_left)  / max_rpm) * 255.0);
+    uint8_t duty_right_front = (uint8_t)((fabs(rpm_right) / max_rpm) * 255.0);
+    uint8_t duty_right_back  = (uint8_t)((fabs(rpm_right) / max_rpm) * 255.0);
 
-
-    // Motor A control
-    if (motor1Speed > 0) {
-        ledcWrite(PWM_CHANNEL_AIN1, duty1);
+    // ---- Motor A (Left Front) ----
+    if (rpm_left > 0) {
+        ledcWrite(PWM_CHANNEL_AIN1, duty_left_front);
         ledcWrite(PWM_CHANNEL_AIN2, 0);
-    } else if (motor1Speed < 0) {
+    } else if (rpm_left < 0) {
         ledcWrite(PWM_CHANNEL_AIN1, 0);
-        ledcWrite(PWM_CHANNEL_AIN2, duty1);
+        ledcWrite(PWM_CHANNEL_AIN2, duty_left_front);
     } else {
         ledcWrite(PWM_CHANNEL_AIN1, 0);
         ledcWrite(PWM_CHANNEL_AIN2, 0);
     }
 
-    // Motor B control
-    if (motor2Speed > 0) {
-        ledcWrite(PWM_CHANNEL_BIN1, duty2);
+    // ---- Motor B (Left Back) ----
+    if (rpm_left > 0) {
+        ledcWrite(PWM_CHANNEL_BIN1, duty_left_back);
         ledcWrite(PWM_CHANNEL_BIN2, 0);
-    } else if (motor2Speed < 0) {
+    } else if (rpm_left < 0) {
         ledcWrite(PWM_CHANNEL_BIN1, 0);
-        ledcWrite(PWM_CHANNEL_BIN2, duty2);
+        ledcWrite(PWM_CHANNEL_BIN2, duty_left_back);
     } else {
         ledcWrite(PWM_CHANNEL_BIN1, 0);
         ledcWrite(PWM_CHANNEL_BIN2, 0);
     }
 
-    debug_motor_msg.linear.x = duty1;
-    debug_motor_msg.linear.y = duty2;
+    // ---- Motor C (Right Front) ----
+    if (rpm_right > 0) {
+        ledcWrite(PWM_CHANNEL_CIN1, duty_right_front);
+        ledcWrite(PWM_CHANNEL_CIN2, 0);
+    } else if (rpm_right < 0) {
+        ledcWrite(PWM_CHANNEL_CIN1, 0);
+        ledcWrite(PWM_CHANNEL_CIN2, duty_right_front);
+    } else {
+        ledcWrite(PWM_CHANNEL_CIN1, 0);
+        ledcWrite(PWM_CHANNEL_CIN2, 0);
+    }
+
+    // ---- Motor D (Right Back) ----
+    if (rpm_right > 0) {
+        ledcWrite(PWM_CHANNEL_DIN1, duty_right_back);
+        ledcWrite(PWM_CHANNEL_DIN2, 0);
+    } else if (rpm_right < 0) {
+        ledcWrite(PWM_CHANNEL_DIN1, 0);
+        ledcWrite(PWM_CHANNEL_DIN2, duty_right_back);
+    } else {
+        ledcWrite(PWM_CHANNEL_DIN1, 0);
+        ledcWrite(PWM_CHANNEL_DIN2, 0);
+    }
+
+    // ส่งข้อมูล debug
+    debug_motor_msg.linear.x = duty_left_front;
+    debug_motor_msg.linear.y = duty_left_back;
+    debug_motor_msg.angular.x = duty_right_front;
+    debug_motor_msg.angular.y = duty_right_back;
 }
+
 
 
 void publishData()
 {
+    encoder_msg.linear.x = encoderLeft.getCount();
+    encoder_msg.linear.y = encoderRight.getCount();
     Serial.print("Publishing debug_motor_msg: ");
     Serial.print(debug_motor_msg.linear.x);
     Serial.print(", ");
@@ -318,7 +346,6 @@ void publishData()
 
 void syncTime()
 {
-
     unsigned long now = millis();
     RCCHECK(rmw_uros_sync_session(10));
     unsigned long long ros_time_ms = rmw_uros_epoch_millis();

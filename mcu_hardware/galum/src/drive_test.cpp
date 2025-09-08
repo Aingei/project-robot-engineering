@@ -11,69 +11,31 @@
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
 
+#include <ESP32Encoder.h>
+#include "../config/galum_move.h"
+
 #include <std_msgs/msg/string.h>
 #include <std_msgs/msg/bool.h>
 #include <std_msgs/msg/int8.h>
 #include <std_msgs/msg/int16_multi_array.h>
 #include <geometry_msgs/msg/twist.h>
 
+// -------- Hardware objects --------
+Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x29);
+ESP32Encoder encoderLeft;
+ESP32Encoder encoderRight;
 
-#define RCCHECK(fn)                  \
-    {                                \
-        rcl_ret_t temp_rc = fn;      \
-        if ((temp_rc != RCL_RET_OK)) \
-        {                            \
-            rclErrorLoop();          \
-        }                            \
-    }
-#define RCSOFTCHECK(fn)              \
-    {                                \
-        rcl_ret_t temp_rc = fn;      \
-        if ((temp_rc != RCL_RET_OK)) \
-        {                            \
-        }                            \
-    }
-#define EXECUTE_EVERY_N_MS(MS, X)          \
-    do                                     \
-    {                                      \
-        static volatile int64_t init = -1; \
-        if (init == -1)                    \
-        {                                  \
-            init = uxr_millis();           \
-        }                                  \
-        if (uxr_millis() - init > MS)      \
-        {                                  \
-            X;                             \
-            init = uxr_millis();           \
-        }                                  \
-    } while (0)
+// -------- Robot geometry --------
+float wheel_separation = 0.20; // meters between wheels
+float wheel_radius = 0.05;     // meters radius of wheel
+float max_rpm = 150.0;         // motor maximum RPM
 
+#ifndef RCCHECK
+// -------- Helpers --------
+#define RCCHECK(fn) { rcl_ret_t temp_rc = fn; if ((temp_rc != RCL_RET_OK)) { rclErrorLoop(); }}
+#define RCSOFTCHECK(fn) { rcl_ret_t temp_rc = fn; (void)temp_rc; }
+#define EXECUTE_EVERY_N_MS(MS, X) do { static volatile int64_t init = -1; if (init == -1) { init = uxr_millis(); } if (uxr_millis() - init > MS) { X; init = uxr_millis(); } } while (0)
 
-// #define AIN1 33
-// #define AIN2 25
-// #define BIN1 26
-// #define BIN2 27
-
-#define AIN1 33
-#define AIN2 25
-#define BIN1 26
-#define BIN2 27
-#define CIN1 14
-#define CIN2 12
-#define DIN1 13
-#define DIN2 15
-
-
-#define PWM_FREQ 5000        // 5 kHz PWM frequency
-#define PWM_RESOLUTION 8     // 8-bit resolution
-#define PWM_CHANNEL_AIN1 0
-#define PWM_CHANNEL_AIN2 1
-#define PWM_CHANNEL_BIN1 2
-#define PWM_CHANNEL_BIN2 3
-#define PWM_CHANNEL_CIN1 4
-#define PWM_CHANNEL_CIN2 5
-#define PWM_CHANNEL_DIN1 6
-#define PWM_CHANNEL_DIN2 7
 
 //------------------------------ < Define > -------------------------------------//
 
@@ -82,6 +44,9 @@ geometry_msgs__msg__Twist debug_motor_msg;
 
 rcl_subscription_t motor_subscriber;
 geometry_msgs__msg__Twist motor_msg;
+
+rcl_publisher_t encoder_publisher;
+geometry_msgs__msg__Twist encoder_msg;
 
 rclc_executor_t executor;
 rclc_support_t support;
@@ -104,8 +69,6 @@ enum states
 } state;
 
 
-
-
 //------------------------------ < Fuction Prototype > ------------------------------//
 
 void rclErrorLoop();
@@ -125,32 +88,45 @@ void Move();
 void setup()
 {   
 
-  Serial.begin(115200);
-  set_microros_serial_transports(Serial);
+    Serial.begin(115200);
+    set_microros_serial_transports(Serial);
+    Wire.begin(21,22);
 
-pinMode(AIN1, OUTPUT);
-pinMode(AIN2, OUTPUT);
-pinMode(BIN1, OUTPUT);
-pinMode(BIN2, OUTPUT);
+    encoderLeft.attachFullQuad(17, 5);
+    encoderLeft.clearCount();
+    encoderRight.attachFullQuad(18, 19);
+    encoderRight.clearCoun
 
-ledcSetup(PWM_CHANNEL_AIN1, PWM_FREQ, PWM_RESOLUTION);
-ledcSetup(PWM_CHANNEL_AIN2, PWM_FREQ, PWM_RESOLUTION);
-ledcSetup(PWM_CHANNEL_BIN1, PWM_FREQ, PWM_RESOLUTION);
-ledcSetup(PWM_CHANNEL_BIN2, PWM_FREQ, PWM_RESOLUTION);
-ledcSetup(PWM_CHANNEL_CIN1, PWM_FREQ, PWM_RESOLUTION);
-ledcSetup(PWM_CHANNEL_CIN2, PWM_FREQ, PWM_RESOLUTION);
-ledcSetup(PWM_CHANNEL_DIN1, PWM_FREQ, PWM_RESOLUTION);
-ledcSetup(PWM_CHANNEL_DIN2, PWM_FREQ, PWM_RESOLUTION);
+    bno.begin();
 
-ledcAttachPin(AIN1, PWM_CHANNEL_AIN1);
-ledcAttachPin(AIN2, PWM_CHANNEL_AIN2);
-ledcAttachPin(BIN1, PWM_CHANNEL_BIN1);
-ledcAttachPin(BIN2, PWM_CHANNEL_BIN2);
-ledcAttachPin(CIN1, PWM_CHANNEL_CIN1);
-ledcAttachPin(CIN2, PWM_CHANNEL_CIN2);
-ledcAttachPin(DIN1, PWM_CHANNEL_DIN1);
-ledcAttachPin(DIN2, PWM_CHANNEL_DIN2);
+    bno.setExtCrystalUse(true);
 
+    pinMode(AIN1, OUTPUT);
+    pinMode(AIN2, OUTPUT);
+    pinMode(BIN1, OUTPUT);
+    pinMode(BIN2, OUTPUT);
+    pinMode(CIN1, OUTPUT);
+    pinMode(CIN2, OUTPUT);
+    pinMode(DIN1, OUTPUT);
+    pinMode(DIN2, OUTPUT);
+
+    ledcSetup(PWM_CHANNEL_AIN1, PWM_FREQ, PWM_RESOLUTION);
+    ledcSetup(PWM_CHANNEL_AIN2, PWM_FREQ, PWM_RESOLUTION);
+    ledcSetup(PWM_CHANNEL_BIN1, PWM_FREQ, PWM_RESOLUTION);
+    ledcSetup(PWM_CHANNEL_BIN2, PWM_FREQ, PWM_RESOLUTION);
+    ledcSetup(PWM_CHANNEL_CIN1, PWM_FREQ, PWM_RESOLUTION);
+    ledcSetup(PWM_CHANNEL_CIN2, PWM_FREQ, PWM_RESOLUTION);
+    ledcSetup(PWM_CHANNEL_DIN1, PWM_FREQ, PWM_RESOLUTION);
+    ledcSetup(PWM_CHANNEL_DIN2, PWM_FREQ, PWM_RESOLUTION);
+
+    ledcAttachPin(AIN1, PWM_CHANNEL_AIN1);
+    ledcAttachPin(AIN2, PWM_CHANNEL_AIN2);
+    ledcAttachPin(BIN1, PWM_CHANNEL_BIN1);
+    ledcAttachPin(BIN2, PWM_CHANNEL_BIN2);
+    ledcAttachPin(CIN1, PWM_CHANNEL_CIN1);
+    ledcAttachPin(CIN2, PWM_CHANNEL_CIN2);
+    ledcAttachPin(DIN1, PWM_CHANNEL_DIN1);
+    ledcAttachPin(DIN2, PWM_CHANNEL_DIN2);
 
 }
 
@@ -201,13 +177,17 @@ void controlCallback(rcl_timer_t *timer, int64_t last_call_time)
 void twistCallback(const void *msgin)
 {
     prev_cmd_time = millis();
+
+      // Store desired velocities from teleop
+    motor_msg.linear.x  = msg->linear.x;   // Forward/backward (m/s)
+    motor_msg.angular.z = msg->angular.z;  // Rotation (rad/s)
 }
 
 
 bool createEntities()
 {
-
     allocator = rcl_get_default_allocator();
+    geometry_msgs__msg__Twist__init(&encoder_msg);
 
     geometry_msgs__msg__Twist__init(&debug_motor_msg);
 
@@ -218,7 +198,7 @@ bool createEntities()
     rclc_support_init_with_options(&support, 0, NULL, &init_options, &allocator);
 
 
-    RCCHECK(rclc_node_init_default(&node, "galum_shooter_node", "", &support));
+    RCCHECK(rclc_node_init_default(&node, "galum_run_node", "", &support));
 
     RCCHECK(rclc_publisher_init_best_effort(
         &debug_motor_publisher,
@@ -232,6 +212,10 @@ bool createEntities()
         ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
         "/galum/cmd_move/rpm"));
 
+    RCCHECK(rclc_publisher_init_best_effort(
+        &encoder_publisher, &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
+        "/galum/encoder"));
 
     const unsigned int control_timeout = 20;
     RCCHECK(rclc_timer_init_default(
@@ -271,32 +255,33 @@ bool destroyEntities()
 }
 
 
-
 void Move(){
-    float motor1Speed = motor_msg.linear.x;
-    float motor2Speed = motor_msg.linear.y;
-    float motor3Speed = motor_msg.angular.x; 
-    float motor4Speed = motor_msg.angular.y;
+    float v = motor_msg.linear.x;   // m/s
+    float omega = motor_msg.angular.z; // rad/s
 
-    // debug_motor_msg.linear.x = motor1Speed;
-    // debug_motor_msg.linear.y = motor2Speed;
+    // Convert to wheel linear velocities
+    float v_left  = v - (omega * wheel_separation / 2.0);
+    float v_right = v + (omega * wheel_separation / 2.0);
 
-    float max_rpm = 150.0;
+    // Convert to RPM
+    float rpm_left  = (v_left  / (2 * M_PI * wheel_radius)) * 60.0;
+    float rpm_right = (v_right / (2 * M_PI * wheel_radius)) * 60.0;
+
+    // Clamp RPM
+    rpm_left  = constrain(rpm_left,  -max_rpm, max_rpm);
+    rpm_right = constrain(rpm_right, -max_rpm, max_rpm);
 
     uint8_t duty1 = (uint8_t)((fabs(motor1Speed) / max_rpm) * 255.0);
     uint8_t duty2 = (uint8_t)((fabs(motor2Speed) / max_rpm) * 255.0);
-    uint8_t duty3 = (uint8_t)((fabs(motor3Speed) / max_rpm) * 255.0);
-    uint8_t duty4 = (uint8_t)((fabs(motor4Speed) / max_rpm) * 255.0);
-
 
     // Motor A control
-    if (motor1Speed > 0) { //forward
+    if (motor1Speed > 0) {
         ledcWrite(PWM_CHANNEL_AIN1, duty1);
         ledcWrite(PWM_CHANNEL_AIN2, 0);
-    } else if (motor1Speed < 0) { //inverse
+    } else if (motor1Speed < 0) {
         ledcWrite(PWM_CHANNEL_AIN1, 0);
         ledcWrite(PWM_CHANNEL_AIN2, duty1);
-    } else { //stop
+    } else {
         ledcWrite(PWM_CHANNEL_AIN1, 0);
         ledcWrite(PWM_CHANNEL_AIN2, 0);
     }
@@ -312,31 +297,6 @@ void Move(){
         ledcWrite(PWM_CHANNEL_BIN1, 0);
         ledcWrite(PWM_CHANNEL_BIN2, 0);
     }
-
-    // Motor C
-    if (motor3Speed > 0) {
-        ledcWrite(PWM_CHANNEL_CIN1, duty3);
-        ledcWrite(PWM_CHANNEL_CIN2, 0);
-    } else if (motor3Speed < 0) {
-        ledcWrite(PWM_CHANNEL_CIN1, 0);
-        ledcWrite(PWM_CHANNEL_CIN2, duty3);
-    } else {
-        ledcWrite(PWM_CHANNEL_CIN1, 0);
-        ledcWrite(PWM_CHANNEL_CIN2, 0);
-    }
-
-    // Motor D
-    if (motor4Speed > 0) {
-        ledcWrite(PWM_CHANNEL_DIN1, duty4);
-        ledcWrite(PWM_CHANNEL_DIN2, 0);
-    } else if (motor4Speed < 0) {
-        ledcWrite(PWM_CHANNEL_DIN1, 0);
-        ledcWrite(PWM_CHANNEL_DIN2, duty4);
-    } else {
-        ledcWrite(PWM_CHANNEL_DIN1, 0);
-        ledcWrite(PWM_CHANNEL_DIN2, 0);
-    }
-
 
     debug_motor_msg.linear.x = duty1;
     debug_motor_msg.linear.y = duty2;
