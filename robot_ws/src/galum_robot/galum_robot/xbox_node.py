@@ -50,13 +50,6 @@ class Joystick(Node):
             Twist, "/galum/stepper", qos_profile=qos.qos_profile_system_default
         )
 
-        # self.pub_servo = self.create_publisher(
-        #     Twist, "/galum/cmd_servo", qos_profile=qos.qos_profile_system_default
-        # )
-
-        self.pub_encoder = self.create_publisher(
-            Twist, "/galum/cmd_encoder", qos_profile=qos.qos_profile_system_default
-        )
         
         self.create_subscription(
             Joy, '/galum/joy', self.joy, qos_profile=qos.qos_profile_sensor_data # 10

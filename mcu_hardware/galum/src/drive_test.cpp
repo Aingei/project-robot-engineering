@@ -246,6 +246,7 @@ bool destroyEntities()
     (void)rmw_uros_set_context_entity_destroy_session_timeout(rmw_context, 0);
 
     rcl_publisher_fini(&debug_motor_publisher, &node);
+    rcl_publisher_fini(&encoder_publisher, &node);
     rcl_node_fini(&node);
     rcl_timer_fini(&control_timer);
     rclc_executor_fini(&executor);
@@ -331,22 +332,15 @@ void Move() {
     debug_motor_msg.linear.y = duty_left_back;
     debug_motor_msg.angular.x = duty_right_front;
     debug_motor_msg.angular.y = duty_right_back;
-    rcl_publish(&debug_motor_publisher, &debug_motor_msg, NULL);
-
-    // ---- Publish encoder ----
-    int32_t left_count  = encoderLeft.getCount();
-    int32_t right_count = encoderRight.getCount();
-    float left_rpm  = (float)left_count / 200.0 * 60.0;
-    float right_rpm = (float)right_count / 200.0 * 60.0;
-    encoder_msg.linear.x  = left_rpm;
-    encoder_msg.linear.y  = right_rpm;
-    rcl_publish(&encoder_publisher, &encoder_msg, NULL);
-    
 }
 
 
 void publishData()
 {
+    encoder_msg.linear.x = encoderLeft.getCount();
+    encoder_msg.linear.y = encoderRight.getCount();
+    rcl_publish(&encoder_publisher, &encoder_msg, NULL);
+    
     Serial.print("Publishing debug_motor_msg: ");
     Serial.print(debug_motor_msg.linear.x);
     Serial.print(", ");
