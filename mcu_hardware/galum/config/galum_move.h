@@ -9,14 +9,14 @@ ROBOT ORIENTATION
          BACK
 */
 
-#define AIN1 33
-#define AIN2 25
-#define BIN1 26
-#define BIN2 27
-#define CIN1 14
-#define CIN2 12
-#define DIN1 13
-#define DIN2 15
+#define AIN1 21
+#define AIN2 19
+#define BIN1 5
+#define BIN2 16
+#define CIN1 33
+#define CIN2 32
+#define DIN1 12
+#define DIN2 14
 
 
 #define PWM_FREQ 5000        // 5 kHz PWM frequency

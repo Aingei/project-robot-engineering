@@ -255,83 +255,79 @@ bool destroyEntities()
     return true;
 }
 
-
 void Move() {
     float v = motor_msg.linear.x;      // m/s
     float omega = motor_msg.angular.z; // rad/s
 
-    // Convert to wheel linear velocities
-    // ล้อหน้า-หลัง สมมติ 4 ล้อ Differential
+    // คำนวณความเร็วล้อซ้าย/ขวา (Differential drive)
     float v_left  = v - (omega * wheel_separation / 2.0);
     float v_right = v + (omega * wheel_separation / 2.0);
 
-    // Convert linear velocity to RPM
+    // แปลง linear velocity -> RPM
     float rpm_left  = (v_left  / (2 * M_PI * wheel_radius)) * 60.0;
     float rpm_right = (v_right / (2 * M_PI * wheel_radius)) * 60.0;
 
-    // Clamp RPM
+    // จำกัด RPM
     rpm_left  = constrain(rpm_left,  -max_rpm, max_rpm);
     rpm_right = constrain(rpm_right, -max_rpm, max_rpm);
 
-    // Convert to duty cycle 0-255
-    uint8_t duty_left_front  = (uint8_t)((fabs(rpm_left)  / max_rpm) * 255.0);
-    uint8_t duty_left_back   = (uint8_t)((fabs(rpm_left)  / max_rpm) * 255.0);
-    uint8_t duty_right_front = (uint8_t)((fabs(rpm_right) / max_rpm) * 255.0);
-    uint8_t duty_right_back  = (uint8_t)((fabs(rpm_right) / max_rpm) * 255.0);
+    // duty cycle 0–255
+    uint8_t duty_left  = (uint8_t)((fabs(rpm_left)  / max_rpm) * 255.0);
+    uint8_t duty_right = (uint8_t)((fabs(rpm_right) / max_rpm) * 255.0);
 
-    // ---- Motor A (Left Front) ----
+    // ---------------- FRONT DRIVE ----------------
+    // Left Front (Motor A)
     if (rpm_left > 0) {
-        ledcWrite(PWM_CHANNEL_AIN1, duty_left_front);
+        ledcWrite(PWM_CHANNEL_AIN1, duty_left);
         ledcWrite(PWM_CHANNEL_AIN2, 0);
     } else if (rpm_left < 0) {
         ledcWrite(PWM_CHANNEL_AIN1, 0);
-        ledcWrite(PWM_CHANNEL_AIN2, duty_left_front);
+        ledcWrite(PWM_CHANNEL_AIN2, duty_left);
     } else {
         ledcWrite(PWM_CHANNEL_AIN1, 0);
         ledcWrite(PWM_CHANNEL_AIN2, 0);
     }
 
-    // ---- Motor B (Left Back) ----
+    // Right Front (Motor B)
+    if (rpm_right > 0) {
+        ledcWrite(PWM_CHANNEL_BIN1, duty_right);
+        ledcWrite(PWM_CHANNEL_BIN2, 0);
+    } else if (rpm_right < 0) {
+        ledcWrite(PWM_CHANNEL_BIN1, 0);
+        ledcWrite(PWM_CHANNEL_BIN2, duty_right);
+    } else {
+        ledcWrite(PWM_CHANNEL_BIN1, 0);
+        ledcWrite(PWM_CHANNEL_BIN2, 0);
+    }
+
+    // ---------------- BACK DRIVE ----------------
+    // Left Back (Motor C)
     if (rpm_left > 0) {
-        ledcWrite(PWM_CHANNEL_BIN1, duty_left_back);
-        ledcWrite(PWM_CHANNEL_BIN2, 0);
+        ledcWrite(PWM_CHANNEL_CIN1, duty_left);
+        ledcWrite(PWM_CHANNEL_CIN2, 0);
     } else if (rpm_left < 0) {
-        ledcWrite(PWM_CHANNEL_BIN1, 0);
-        ledcWrite(PWM_CHANNEL_BIN2, duty_left_back);
-    } else {
-        ledcWrite(PWM_CHANNEL_BIN1, 0);
-        ledcWrite(PWM_CHANNEL_BIN2, 0);
-    }
-
-    // ---- Motor C (Right Front) ----
-    if (rpm_right > 0) {
-        ledcWrite(PWM_CHANNEL_CIN1, duty_right_front);
-        ledcWrite(PWM_CHANNEL_CIN2, 0);
-    } else if (rpm_right < 0) {
         ledcWrite(PWM_CHANNEL_CIN1, 0);
-        ledcWrite(PWM_CHANNEL_CIN2, duty_right_front);
+        ledcWrite(PWM_CHANNEL_CIN2, duty_left);
     } else {
         ledcWrite(PWM_CHANNEL_CIN1, 0);
         ledcWrite(PWM_CHANNEL_CIN2, 0);
     }
 
-    // ---- Motor D (Right Back) ----
+    // Right Back (Motor D)
     if (rpm_right > 0) {
-        ledcWrite(PWM_CHANNEL_DIN1, duty_right_back);
+        ledcWrite(PWM_CHANNEL_DIN1, duty_right);
         ledcWrite(PWM_CHANNEL_DIN2, 0);
     } else if (rpm_right < 0) {
         ledcWrite(PWM_CHANNEL_DIN1, 0);
-        ledcWrite(PWM_CHANNEL_DIN2, duty_right_back);
+        ledcWrite(PWM_CHANNEL_DIN2, duty_right);
     } else {
         ledcWrite(PWM_CHANNEL_DIN1, 0);
         ledcWrite(PWM_CHANNEL_DIN2, 0);
     }
 
-    // ส่งข้อมูล debug
-    debug_motor_msg.linear.x = duty_left_front;
-    debug_motor_msg.linear.y = duty_left_back;
-    debug_motor_msg.angular.x = duty_right_front;
-    debug_motor_msg.angular.y = duty_right_back;
+    // Debug (ส่ง duty ของซ้าย/ขวา)
+    debug_motor_msg.linear.x = duty_left;
+    debug_motor_msg.linear.y = duty_right;
 }
 
 
