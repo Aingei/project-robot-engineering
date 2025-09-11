@@ -59,7 +59,7 @@ class galum_speed(Node):
 
     def cmd_vel(self, msg):
         
-        linear_vel = msg.linear.x    # forward/backward
+        linear_vel = -msg.linear.x    # forward/backward
         angular_vel = msg.angular.z  # turning rate
         angular_vel = angular_vel * 5
 
@@ -68,24 +68,26 @@ class galum_speed(Node):
         v_right = linear_vel + (angular_vel * self.wheel_base / 2.0)
 
         # Convert to motor speeds in RPM
-        rpm_left = float(v_left * self.maxRPM)
-        rpm_right = float(v_right * self.maxRPM)
+        rpm_left_front = (v_left / (2 * math.pi * self.wheel_radius)) * 60.0
+        rpm_left_back = (v_left / (2 * math.pi * self.wheel_radius)) * 60.0
+        rpm_right_front = (v_right / (2 * math.pi * self.wheel_radius)) * 60.0
+        rpm_right_back = (v_right / (2 * math.pi * self.wheel_radius)) * 60.0
 
         # Assign speeds to all 4 wheels
-        self.motor1Speed = rpm_left   # Left Front
-        self.motor2Speed = rpm_left   # Left Rear
-        self.motor3Speed = rpm_right  # Right Front
-        self.motor4Speed = rpm_right  # Right Rear
+        self.motor1Speed = rpm_left_front  # Left Front
+        self.motor2Speed = rpm_right_front # Right Front
+        self.motor3Speed = rpm_left_back   # Left Rear
+        self.motor4Speed = rpm_right_back  # Right Rear
 
-        print(f"Left Motors: {self.motor1Speed:.2f}, {self.motor2Speed:.2f} RPM | "
-            f"Right Motors: {self.motor3Speed:.2f}, {self.motor4Speed:.2f} RPM")
+        print(f"Left Motors: {self.motor1Speed:.2f}, {self.motor3Speed:.2f} RPM | "
+            f"Right Motors: {self.motor2Speed:.2f}, {self.motor4Speed:.2f} RPM")
  
     def sendData(self):
         motorspeed_msg = Twist()
        
         motorspeed_msg.linear.x = float(self.motor1Speed) #left front
-        motorspeed_msg.linear.y = float(self.motor2Speed) #left rear
-        motorspeed_msg.angular.x = float(self.motor3Speed) #right front
+        motorspeed_msg.linear.y = float(self.motor2Speed) #right front
+        motorspeed_msg.angular.x = float(self.motor3Speed) #left rear
         motorspeed_msg.angular.y = float(self.motor4Speed) #right rear
         
         self.send_robot_speed.publish(motorspeed_msg)
