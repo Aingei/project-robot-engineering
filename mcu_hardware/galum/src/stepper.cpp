@@ -15,7 +15,7 @@
 #define STEPS_PER_REV 200
 
 // ---- Step timing (tune these) ----
-#define MAX_ABS_SPS          3000.0f   // max |steps/s|
+#define MAX_ABS_speed          3000.0f   // max |steps/s|
 #define MIN_STEP_INTERVAL_US 150       // clamp fastest to ~6.6 kHz
 #define STEP_PULSE_US        3         // step HIGH width (>=2us for most drivers)
 
@@ -43,7 +43,7 @@ enum AgentState { WAITING_AGENT, AGENT_AVAILABLE, AGENT_CONNECTED, AGENT_DISCONN
 // -------- Stepper control state --------
 volatile long   step_position = 0;      // total steps since boot
 volatile float  target_speed   = 0.0f;   // commanded speed (steps/s)
-volatile uint32_t step_interval_us = 1000000; // derived from target_sps
+volatile uint32_t step_interval_us = 1000000; // derived from target_speed
 uint32_t last_step_us = 0;
 
 // -------- Time sync (optional for stamped msgs) --------
@@ -100,11 +100,11 @@ void loop() {
   }
 
   // Non-blocking step generation (driven by micros)
-  if (target_sps != 0.0f) {
+  if (target_speed != 0.0f) {
     uint32_t now = micros();
     if ((uint32_t)(now - last_step_us) >= step_interval_us) {
-      // Direction: HIGH for CW if target_sps > 0 (tune as needed)
-      bool clockwise = (target_sps > 0.0f);
+      // Direction: HIGH for CW if target_speed > 0 (tune as needed)
+      bool clockwise = (target_speed > 0.0f);
       digitalWrite(DIR_PIN, clockwise ? HIGH : LOW);
 
       // Emit one step pulse
@@ -181,19 +181,19 @@ void cmdCallback(const void *msgin) {
   const geometry_msgs__msg__Twist *msg = (const geometry_msgs__msg__Twist *)msgin;
 
   // Command: use linear.x as steps/second (signed)
-  float sps = msg->linear.x;
+  float speed = msg->linear.x;
 
   // Limit and translate to interval
-  if (sps >  MAX_ABS_SPS) sps =  MAX_ABS_SPS;
-  if (sps < -MAX_ABS_SPS) sps = -MAX_ABS_SPS;
+  if (speed >  MAX_ABS_speed) speed =  MAX_ABS_speed;
+  if (speed < -MAX_ABS_speed) speed = -MAX_ABS_speed;
 
-  target_sps = sps;
+  target_speed = speed;
 
-  if (target_sps == 0.0f) {
+  if (target_speed == 0.0f) {
     // no stepping
     step_interval_us = 1000000;
   } else {
-    float interval_f = 1000000.0f / fabsf(target_sps);
+    float interval_f = 1000000.0f / fabsf(target_speed);
     if (interval_f < MIN_STEP_INTERVAL_US) interval_f = MIN_STEP_INTERVAL_US;
     step_interval_us = (uint32_t)interval_f;
   }
@@ -202,7 +202,7 @@ void cmdCallback(const void *msgin) {
 void controlCallback(rcl_timer_t * /*timer*/, int64_t /*last_call_time*/) {
   // Publish status @ 50 Hz
   status_msg.linear.x  = (double)step_position;       // position (steps)
-  status_msg.linear.y  = (double)target_sps;          // commanded sps
+  status_msg.linear.y  = (double)target_speed;          // commanded speed
   status_msg.angular.z = (double)step_interval_us;    // effective us
 
   RCSOFTCHECK(rcl_publish(&status_pub, &status_msg, NULL));

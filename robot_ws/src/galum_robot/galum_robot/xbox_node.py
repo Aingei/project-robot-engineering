@@ -110,7 +110,18 @@ class Joystick(Node):
         if self.gamepad.button_circle:
             cmd_servo.linear.x = float(2.0)  #Opened Servo
             
-        cmd_stepper.linear.x = SPIN_SPEED if self.is_spinning else 0.0
+        speed_r = self.gamepad.r2 * self.maxspeed_stepper
+        speed_l = self.gamepad.l2 * self.maxspeed_stepper
+
+        if self.gamepad.r1 and not self.gamepad.l1:
+            # ตามเข็ม: ให้เป็นค่าบวก
+            cmd_stepper.linear.x = + (speed_r if speed_r > 0.0 else self.maxspeed_stepper * 0.5)
+        elif self.gamepad.l1 and not self.gamepad.r1:
+            # ทวนเข็ม: ให้เป็นค่าลบ
+            cmd_stepper.linear.x = - (speed_l if speed_l > 0.0 else self.maxspeed_stepper * 0.5)
+        else:
+            # ไม่กด/กดพร้อมกัน -> หยุด
+            cmd_stepper.linear.x = 0.0
         
         
         self.pub_move.publish(cmd_vel_move)

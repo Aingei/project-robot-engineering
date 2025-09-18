@@ -48,7 +48,7 @@ class servo(Node):
         servo_msg.linear.x = float(self.servo_angle)
         
         
-        self.send_robot_stepper.publish(servo_msg)
+        self.send_robot_servo.publish(servo_msg)
          
 def main(args=None):
     rclpy.init()

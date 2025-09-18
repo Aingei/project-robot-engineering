@@ -42,6 +42,13 @@ class Stepper(Node):
         self.get_logger().info(
             f"Stepper {'ON' if self.is_spinning else 'OFF'} (cmd {cmd.linear.x} sps)"
         )
+    def sendData(self):
+        stepper_msg = Twist()
+       
+        stepper_msg.linear.x = float(self.is_spinning)
+        
+        
+        self.send_robot_stepper.publish(stepper_msg)
 
 def main(args=None):
     rclpy.init(args=args)
