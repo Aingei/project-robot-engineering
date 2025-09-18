@@ -29,7 +29,7 @@ setup(
             'showcamera = galum_robot.showcamera:main',
             'joystick_node = galum_robot.joystick_node:main',
             'xbox_node = galum_robot.xbox_node:main',
-            'stepper_simple = galum_robot.stepper_simple:main',
+            'stepper= galum_robot.stepper:main',
 
         ],
     },

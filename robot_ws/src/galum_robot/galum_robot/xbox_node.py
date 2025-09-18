@@ -50,7 +50,7 @@ class Joystick(Node):
             Twist, "/galum/stepper", qos_profile=qos.qos_profile_system_default
         )
 
-         self.pub_servo = self.create_publisher(
+        self.pub_servo = self.create_publisher(
             Twist, "/galum/servo", qos_profile=qos.qos_profile_system_default
         )
         
@@ -60,6 +60,7 @@ class Joystick(Node):
 
         self.gamepad = Gamepad()
         self.maxspeed : float = 1.0
+        self.maxspeed_stepper: float = 1.0
         
         self.sent_data_timer = self.create_timer(0.01, self.sendData)
 

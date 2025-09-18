@@ -15,7 +15,7 @@ class Stepper(Node):
         self.is_spinning = False
 
         self.send_robot_stepper = self.create_publisher(
-            Twist, "/galum/stepper/angle", qos_profile=qos.qos_profile_system_default
+            Twist, "/galum/stepper", qos_profile=qos.qos_profile_system_default
         )
         
         self.create_subscription(
@@ -27,9 +27,9 @@ class Stepper(Node):
 
         # self.sent_data_timer = self.create_timer(0.01, self.sendData) 
         
-        self.get_logger().info(f"StepperToggle ready: listening on {INPUT_TOPIC}")
+        self.sent_data_timer = self.create_timer(0.01, self.sendData)
         
-     def on_toggle(self, msg: Bool):
+    def on_toggle(self, msg: Bool):
         # ถ้า msg.data == True → toggle
         if msg.data:
             self.is_spinning = not self.is_spinning
@@ -45,7 +45,7 @@ class Stepper(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = StepperToggle()
+    node = Stepper()
     try:
         rclpy.spin(node)
     finally:
