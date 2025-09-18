@@ -16,9 +16,9 @@ def generate_launch_description():
         'motor_config.yaml'
     )
     
-    stepper_simple = Node(
+    stepper = Node(
         package="galum_robot",
-        executable="stepper_simple",
+        executable="stepper",
         name="stepper_node",
         # output="screen",
         namespace="",
@@ -42,6 +42,6 @@ def generate_launch_description():
     
     ld.add_action(node_microros_1)
     ld.add_action(galum_speed)
-    ld.add_action(stepper_simple)
+    ld.add_action(stepper)
 
     return ld

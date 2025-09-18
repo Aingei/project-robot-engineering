@@ -59,13 +59,13 @@ class galum_speed(Node):
 
     def cmd_vel(self, msg):
         
-        linear_vel = -msg.linear.x    # forward/backward
+        linear_vel =  msg.linear.x    # forward/backward
         angular_vel = msg.angular.z  # turning rate
         angular_vel = angular_vel * 5
 
         # Compute left and right wheel speeds (in m/s)
-        v_left = linear_vel - (angular_vel * self.wheel_base / 2.0)
-        v_right = linear_vel + (angular_vel * self.wheel_base / 2.0)
+        v_left = linear_vel + (angular_vel * self.wheel_base / 2.0)
+        v_right = linear_vel - (angular_vel * self.wheel_base / 2.0)
 
         # Convert to motor speeds in RPM
         rpm_left_front = (v_left / (2 * math.pi * self.wheel_radius)) * 60.0

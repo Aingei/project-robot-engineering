@@ -9,27 +9,22 @@ from rclpy import qos
 import time 
 import math
 
-# STEPS_PER_REV = 200
-# MICROSTEP = 16
-# DELAY = 0.001 
-
-class stepper_simple(Node):
-    
+class servo(Node):
     
     def __init__(self):
-        super().__init__("stepper_simple")
+        super().__init__("servo")
         
         
-        self.stepper_angle : float = 0
+        self.servo_angle : float = 0
         
         self.previous_manual_turn = time.time()
 
-        self.send_robot_stepper = self.create_publisher(
-            Twist, "/galum/stepper/angle", qos_profile=qos.qos_profile_system_default
+        self.send_robot_servo = self.create_publisher(
+            Twist, "/galum/servo/angle", qos_profile=qos.qos_profile_system_default
         )
         
         self.create_subscription(
-            Twist, '/galum/stepper', self.rotate_stepper, qos_profile=qos.qos_profile_system_default
+            Twist, '/galum/servo', self.rotate_servo, qos_profile=qos.qos_profile_system_default
         )
         
         # timer เรียกทุก 0.5 วิ → หมุน Stepper
@@ -39,25 +34,25 @@ class stepper_simple(Node):
         
     # ---------- ฟังก์ชันหมุน stepper ----------
      
-    def rotate_stepper(self, msg):
+    def rotate_servo(self, msg):
         
         if msg.linear.x == 1:               # Closed Stepper
-            self.stepper_angle = float(0.0)
+            self.servo_angle = float(0.0)
 
         elif msg.linear.x == 2:               # Opened Stepper
-            self.stepper_angle = float(90.0)
+            self.servo_angle = float(90.0)
             
     def sendData(self):
-        stepper_msg = Twist()
+        servo_msg = Twist()
        
-        stepper_msg.linear.x = float(self.stepper_angle)
+        servo_msg.linear.x = float(self.servo_angle)
         
         
-        self.send_robot_stepper.publish(stepper_msg)
+        self.send_robot_stepper.publish(servo_msg)
          
 def main(args=None):
     rclpy.init()
-    sub = stepper_simple()
+    sub = servo()
     rclpy.spin(sub)
     rclpy.shutdown()
 

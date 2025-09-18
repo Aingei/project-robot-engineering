@@ -18,6 +18,7 @@
 
 #include <Adafruit_BNO055.h>
 #include <Adafruit_Sensor.h>
+#include <std_msgs/msg/bool.h>
 
 // -------- Hardware objects --------
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x29);
