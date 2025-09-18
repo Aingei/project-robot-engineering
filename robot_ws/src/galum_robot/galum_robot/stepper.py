@@ -34,14 +34,7 @@ class Stepper(Node):
         if msg.data:
             self.is_spinning = not self.is_spinning
             self.publish_cmd()
-            
-    def publish_cmd(self):
-        cmd = Twist()
-        cmd.linear.x = SPIN_SPEED if self.is_spinning else 0.0
-        self.cmd_pub.publish(cmd)
-        self.get_logger().info(
-            f"Stepper {'ON' if self.is_spinning else 'OFF'} (cmd {cmd.linear.x} sps)"
-        )
+    
     def sendData(self):
         stepper_msg = Twist()
        
