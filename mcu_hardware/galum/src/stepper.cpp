@@ -140,7 +140,7 @@ bool createEntities() {
   RCCHECK(rclc_subscription_init_default(
     &cmd_sub, &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
-    "/galum/stepper/angle"));
+    "/galum/stepper"));
 
   // Publisher: /stepper/status (Twist)
   RCCHECK(rclc_publisher_init_best_effort(
