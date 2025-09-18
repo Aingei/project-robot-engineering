@@ -15,7 +15,7 @@ class Stepper(Node):
         self.is_spinning = False
 
         self.send_robot_stepper = self.create_publisher(
-            Twist, "/galum/stepper", qos_profile=qos.qos_profile_system_default
+            Twist, "/galum/stepper/angle", qos_profile=qos.qos_profile_system_default
         )
         
         self.create_subscription(
