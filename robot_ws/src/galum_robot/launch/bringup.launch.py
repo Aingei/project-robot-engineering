@@ -19,7 +19,7 @@ def generate_launch_description():
     stepper = Node(
         package="galum_robot",
         executable="stepper",
-        name="stepper_node",
+        name="stepper_node_PY",
         # output="screen",
         namespace="",
     )

@@ -9,17 +9,23 @@
 
 #include <geometry_msgs/msg/twist.h>
 
-// -------- Hardware config --------
+// -------- Hardware config -------- 
 #define STEP_PIN 32
 #define DIR_PIN  17
 #define LED_PIN   2         // onboard LED (ESP32)
-#define DIR_SETUP_US 10   // หน่วงสั้น ๆ หลังเปลี่ยนทิศ (5–20us ปลอดภัย)
+#define DIR_SETUP_US 20   // หน่วงสั้น ๆ หลังเปลี่ยนทิศ (5–20us ปลอดภัย)
 
+
+// ---- Pulse mode params ----
+#define PULSES_PER_CLICK      50       // กดครั้งเดียว = กี่พัลส์ (ดีฟอลต์)
+#define STEP_RATE_SPS       2000.0f    // ยิงพัลส์กี่ steps/s
+#define MIN_STEP_INTERVAL_US  60       // กันเร็วเกินไปสำหรับไดรเวอร์
+#define STEP_PULSE_US         20       // ความกว้างพัลส์ HIGH
 
 // ---- Step timing (tune these) ----
 #define MAX_ABS_speed          8000.0f   // max |steps/s|
 #define MIN_STEP_INTERVAL_US     60     // clamp fastest to ~6.6 kHz
-#define STEP_PULSE_US              8     // step HIGH width (>=2us for most drivers)
+#define STEP_PULSE_US            20    // step HIGH width (>=2us for most drivers)
 
 // -------- Helpers --------
 #define RCCHECK(fn)  { rcl_ret_t rc = (fn); if (rc != RCL_RET_OK) { rclErrorLoop(); } }
@@ -45,13 +51,12 @@ geometry_msgs__msg__Twist status_msg;
 enum AgentState { WAITING_AGENT, AGENT_AVAILABLE, AGENT_CONNECTED, AGENT_DISCONNECTED };
 AgentState state = WAITING_AGENT;
 
-// -------- Stepper control state --------
-volatile long     step_position    = 0;        // total steps since boot
-volatile float    target_speed     = 0.0f;     // commanded speed (steps/s)
-volatile uint32_t step_interval_us = 1000000;  // derived from target_speed
-volatile bool     dir_clockwise    = true;
-uint32_t          last_step_us     = 0;
-
+// -------- Stepper state (pulse-per-click mode) --------
+volatile long     step_position     = 0;        // สะสมตำแหน่งทั้งหมด
+volatile long     pending_steps     = 0;        // พัลส์ยกค้าง (signed)
+volatile bool     current_dir_cw    = true;     // ทิศล่าสุดที่กำลังยิง
+uint32_t          step_interval_us  = 500;      // คำนวณจาก STEP_RATE_SPS
+uint32_t          last_step_us      = 0;
 // -------- Time sync (optional for stamped msgs) --------
 unsigned long long time_offset = 0;
 
@@ -75,6 +80,11 @@ void setup() {
   digitalWrite(STEP_PIN, LOW);
   digitalWrite(DIR_PIN,  LOW);
   digitalWrite(LED_PIN,  LOW);
+
+  float interval_f = 1000000.0f / STEP_RATE_SPS;
+  if (interval_f < MIN_STEP_INTERVAL_US) interval_f = MIN_STEP_INTERVAL_US;
+  step_interval_us = (uint32_t)interval_f;
+  last_step_us = micros();
 }
 
 // ---------------- Loop ----------------------
@@ -109,33 +119,35 @@ void loop() {
   }
 
   // Non-blocking step generation (driven by micros)
-  if (target_speed != 0.0f) {
-    static bool prev_clockwise = true;   // << จำทิศครั้งก่อน
+   // -------- Pulse-per-click stepping --------
+  if (pending_steps != 0) {
     uint32_t now = micros();
-
     if ((uint32_t)(now - last_step_us) >= step_interval_us) {
 
-      bool clockwise = (target_speed > 0.0f);
+      bool want_cw = (pending_steps > 0);
+      static bool prev_cw = true;
 
-      // ถ้า “เพิ่ง” เปลี่ยนทิศ: ตั้ง DIR แล้วรอ DIR_SETUP_US ก่อนยิงพัลส์แรก
-      if (clockwise != prev_clockwise) {
-        digitalWrite(DIR_PIN, clockwise ? HIGH : LOW);
-        delayMicroseconds(DIR_SETUP_US);     // *** สำคัญ: setup time ของ DIR ***
-        prev_clockwise = clockwise;
+      // เปลี่ยนทิศ? ตั้ง DIR แล้วดีเลย์ก่อนพัลส์แรกของทิศใหม่
+      if (want_cw != prev_cw) {
+        digitalWrite(DIR_PIN, want_cw ? HIGH : LOW);
+        delayMicroseconds(DIR_SETUP_US);
+        prev_cw = want_cw;
+        current_dir_cw = want_cw;
       } else {
-        // ทิศเดิม: ตั้ง DIR ตามปกติ
-        digitalWrite(DIR_PIN, clockwise ? HIGH : LOW);
+        digitalWrite(DIR_PIN, want_cw ? HIGH : LOW);
+        current_dir_cw = want_cw;
       }
 
-      // Emit one step pulse
+      // ยิงพัลส์ 1 ครั้ง
       digitalWrite(STEP_PIN, HIGH);
       delayMicroseconds(STEP_PULSE_US);
       digitalWrite(STEP_PIN, LOW);
 
-      // Update position
-      step_position += clockwise ? 1 : -1;
+      // อัปเดตตัวนับ
+      step_position += current_dir_cw ? 1 : -1;
+      pending_steps += current_dir_cw ? -1 : +1;   // ลดให้เข้าใกล้ศูนย์
 
-      // เดิน clock ต่อแบบสะสม ลด jitter
+      // เดิน clock แบบสะสม ลด jitter
       last_step_us += step_interval_us;
     }
   }
@@ -146,7 +158,7 @@ bool createEntities() {
   allocator = rcl_get_default_allocator();
 
   // init messages
-  geometry_msgs__msg__Twist__init(&cmd_msg);
+  geometry_msgs__msg__Twist__init(&cmd_msg);  
   geometry_msgs__msg__Twist__init(&status_msg);
 
   rcl_init_options_t init_options = rcl_get_zero_initialized_init_options();
@@ -183,6 +195,9 @@ bool createEntities() {
   RCCHECK(rclc_executor_add_subscription(&executor, &cmd_sub, &cmd_msg, &cmdCallback, ON_NEW_DATA));
   RCCHECK(rclc_executor_add_timer(&executor, &control_timer));
 
+  pending_steps = 0;
+  step_position = 0;
+
   syncTime();
   return true;
 }
@@ -203,40 +218,38 @@ bool destroyEntities() {
 
 // -------- Callbacks --------
 void cmdCallback(const void *msgin) {
-  const geometry_msgs__msg__Twist *msg = (const geometry_msgs__msg__Twist *)msgin;
+  const auto *msg = (const geometry_msgs__msg__Twist*) msgin;
 
-  // ใช้ linear.x เป็นความเร็ว steps/s (signed)
-  float speed = (float)msg->linear.x;
-
-  // Limit
-  if (speed >  MAX_ABS_speed) speed =  MAX_ABS_speed;
-  if (speed < -MAX_ABS_speed) speed = -MAX_ABS_speed;
-
-  target_speed  = speed;
-  dir_clockwise = (target_speed >= 0.0f);
-
-  if (target_speed == 0.0f) {
-    step_interval_us = 1000000;
-  } else {
-    float interval_f = 1000000.0f / fabsf(target_speed);
-    if (interval_f < MIN_STEP_INTERVAL_US) interval_f = MIN_STEP_INTERVAL_US;
-    step_interval_us = (uint32_t)interval_f;
+  // ปุ่มหยุดฉุกเฉิน / เคลียร์คิว: ส่ง (0,0)
+  if (msg->linear.x == 0.0 && msg->linear.y == 0.0) {
+    pending_steps = 0;
+    Serial.println("[STOP] clear pending");
+    return;
   }
 
-  // เริ่มก้าวทันทีหลังได้รับคำสั่ง
-  last_step_us = micros();
+  // รับทิศ: ต้องเป็นบวก/ลบเท่านั้น  (0 = ไม่ทำอะไร)
+  if (msg->linear.x == 0.0) return;
+  bool dir_cw = (msg->linear.x > 0.0);
 
-  // Debug สั้นๆ
-  Serial.print("[CMD] speed="); Serial.print(target_speed);
-  Serial.print(" dir="); Serial.print(dir_clockwise ? "CW" : "CCW");
-  Serial.print(" us="); Serial.println(step_interval_us);
+  // จำนวนพัลส์: รับเฉพาะ >0 เท่านั้น (ไม่ใช้ default อัตโนมัติ)
+  long pulses = (long) llround(msg->linear.y);
+  if (pulses <= 0) return;
+
+  if (dir_cw) pending_steps += pulses;
+  else        pending_steps -= pulses;
+
+  Serial.printf("[CLICK] dir=%s add=%ld pending=%ld\n",
+                dir_cw ? "CW" : "CCW", pulses, pending_steps);
 }
+
 
 void controlCallback(rcl_timer_t * /*timer*/, int64_t /*last_call_time*/) {
   // Publish status @ 50 Hz
   status_msg.linear.x  = (double)step_position;     // position (steps)
-  status_msg.linear.y  = (double)target_speed;      // commanded speed
+  status_msg.linear.y  = (double)pending_steps;      // commanded speed
   status_msg.angular.z = (double)step_interval_us;  // effective us
+  status_msg.angular.x = (double)555555555555;  // effective us
+
 
   RCRET_IGNORE(rcl_publish(&status_pub, &status_msg, NULL));
 }

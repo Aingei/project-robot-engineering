@@ -114,9 +114,9 @@ class Joystick(Node):
 
             # -------- stepper --------
         if self.gamepad.button_triangle:      # ปุ่ม △
-            cmd_stepper.linear.x = float(+self.maxspeed_stepper)   # ตามเข็ม
+            cmd_stepper.linear.x = float(3.0)   # ตามเข็ม
         elif self.gamepad.button_square:      # ปุ่ม ☐
-            cmd_stepper.linear.x = float(-self.maxspeed_stepper)   # ทวนเข็ม
+            cmd_stepper.linear.x = float(4.0)   # ทวนเข็ม
         else:
             cmd_stepper.linear.x = 0.0
 
