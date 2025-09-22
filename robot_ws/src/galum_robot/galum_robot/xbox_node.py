@@ -60,7 +60,7 @@ class Joystick(Node):
 
         self.gamepad = Gamepad()
         self.maxspeed : float = 1.0
-        self.maxspeed_stepper: float = 1.0
+        self.maxspeed_stepper: float = 800.0
         
         self.sent_data_timer = self.create_timer(0.01, self.sendData)
 
@@ -111,27 +111,22 @@ class Joystick(Node):
         if self.gamepad.button_circle:
             cmd_servo.linear.x = float(2.0)  #Opened Servo
             
-        speed_r = self.gamepad.r2 * self.maxspeed_stepper
-        speed_l = self.gamepad.l2 * self.maxspeed_stepper
 
-        if self.gamepad.r1 and not self.gamepad.l1:
-            # ตามเข็ม: ให้เป็นค่าบวก
-            cmd_stepper.linear.x = + (speed_r if speed_r > 0.0 else self.maxspeed_stepper * 0.5)
-        elif self.gamepad.l1 and not self.gamepad.r1:
-            # ทวนเข็ม: ให้เป็นค่าลบ
-            cmd_stepper.linear.x = - (speed_l if speed_l > 0.0 else self.maxspeed_stepper * 0.5)
+            # -------- stepper --------
+        if self.gamepad.button_triangle:      # ปุ่ม △
+            cmd_stepper.linear.x = float(+self.maxspeed_stepper)   # ตามเข็ม
+        elif self.gamepad.button_square:      # ปุ่ม ☐
+            cmd_stepper.linear.x = float(-self.maxspeed_stepper)   # ทวนเข็ม
         else:
-            # ไม่กด/กดพร้อมกัน -> หยุด
             cmd_stepper.linear.x = 0.0
-        
-        
+
+            
         self.pub_move.publish(cmd_vel_move)
         self.pub_servo.publish(cmd_servo)
         self.pub_stepper.publish(cmd_stepper)
 
 def main():
     rclpy.init()
-
     sub = Joystick()
     rclpy.spin(sub)
     rclpy.shutdown()

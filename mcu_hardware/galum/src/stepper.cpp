@@ -12,16 +12,19 @@
 // -------- Hardware config --------
 #define STEP_PIN 32
 #define DIR_PIN  17
-#define STEPS_PER_REV 200
+#define LED_PIN   2         // onboard LED (ESP32)
+#define DIR_SETUP_US 10   // หน่วงสั้น ๆ หลังเปลี่ยนทิศ (5–20us ปลอดภัย)
+
 
 // ---- Step timing (tune these) ----
-#define MAX_ABS_speed          3000.0f   // max |steps/s|
-#define MIN_STEP_INTERVAL_US 150       // clamp fastest to ~6.6 kHz
-#define STEP_PULSE_US        3         // step HIGH width (>=2us for most drivers)
+#define MAX_ABS_speed          8000.0f   // max |steps/s|
+#define MIN_STEP_INTERVAL_US     60     // clamp fastest to ~6.6 kHz
+#define STEP_PULSE_US              8     // step HIGH width (>=2us for most drivers)
 
 // -------- Helpers --------
 #define RCCHECK(fn)  { rcl_ret_t rc = (fn); if (rc != RCL_RET_OK) { rclErrorLoop(); } }
 #define RCSOFTCHECK(fn) (void)(fn)
+#define RCRET_IGNORE(expr) do { rcl_ret_t _rc = (expr); (void)_rc; } while (0)
 #define EXECUTE_EVERY_N_MS(MS, X) do { static int64_t t=-1; if (t==-1) t = uxr_millis(); \
   if ((int32_t)(uxr_millis()-t) > (MS)) { X; t = uxr_millis(); } } while (0)
 
@@ -38,13 +41,16 @@ geometry_msgs__msg__Twist cmd_msg;
 rcl_publisher_t status_pub;
 geometry_msgs__msg__Twist status_msg;
 
-enum AgentState { WAITING_AGENT, AGENT_AVAILABLE, AGENT_CONNECTED, AGENT_DISCONNECTED } state = WAITING_AGENT;
+// -------- Agent state --------
+enum AgentState { WAITING_AGENT, AGENT_AVAILABLE, AGENT_CONNECTED, AGENT_DISCONNECTED };
+AgentState state = WAITING_AGENT;
 
 // -------- Stepper control state --------
-volatile long   step_position = 0;      // total steps since boot
-volatile float  target_speed   = 0.0f;   // commanded speed (steps/s)
-volatile uint32_t step_interval_us = 1000000; // derived from target_speed
-uint32_t last_step_us = 0;
+volatile long     step_position    = 0;        // total steps since boot
+volatile float    target_speed     = 0.0f;     // commanded speed (steps/s)
+volatile uint32_t step_interval_us = 1000000;  // derived from target_speed
+volatile bool     dir_clockwise    = true;
+uint32_t          last_step_us     = 0;
 
 // -------- Time sync (optional for stamped msgs) --------
 unsigned long long time_offset = 0;
@@ -65,8 +71,10 @@ void setup() {
 
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIR_PIN,  OUTPUT);
+  pinMode(LED_PIN,  OUTPUT);
   digitalWrite(STEP_PIN, LOW);
-  digitalWrite(DIR_PIN, LOW);
+  digitalWrite(DIR_PIN,  LOW);
+  digitalWrite(LED_PIN,  LOW);
 }
 
 // ---------------- Loop ----------------------
@@ -76,6 +84,7 @@ void loop() {
       EXECUTE_EVERY_N_MS(500,
         state = (RMW_RET_OK == rmw_uros_ping_agent(100, 1)) ? AGENT_AVAILABLE : WAITING_AGENT;
       );
+      digitalWrite(LED_PIN, LOW);
       break;
 
     case AGENT_AVAILABLE:
@@ -88,7 +97,7 @@ void loop() {
         state = (RMW_RET_OK == rmw_uros_ping_agent(100, 1)) ? AGENT_CONNECTED : AGENT_DISCONNECTED;
       );
       if (state == AGENT_CONNECTED) {
-        // Let executor run timers & subscriptions
+        digitalWrite(LED_PIN, HIGH);
         rclc_executor_spin_some(&executor, RCL_MS_TO_NS(5));
       }
       break;
@@ -101,11 +110,22 @@ void loop() {
 
   // Non-blocking step generation (driven by micros)
   if (target_speed != 0.0f) {
+    static bool prev_clockwise = true;   // << จำทิศครั้งก่อน
     uint32_t now = micros();
+
     if ((uint32_t)(now - last_step_us) >= step_interval_us) {
-      // Direction: HIGH for CW if target_speed > 0 (tune as needed)
+
       bool clockwise = (target_speed > 0.0f);
-      digitalWrite(DIR_PIN, clockwise ? HIGH : LOW);
+
+      // ถ้า “เพิ่ง” เปลี่ยนทิศ: ตั้ง DIR แล้วรอ DIR_SETUP_US ก่อนยิงพัลส์แรก
+      if (clockwise != prev_clockwise) {
+        digitalWrite(DIR_PIN, clockwise ? HIGH : LOW);
+        delayMicroseconds(DIR_SETUP_US);     // *** สำคัญ: setup time ของ DIR ***
+        prev_clockwise = clockwise;
+      } else {
+        // ทิศเดิม: ตั้ง DIR ตามปกติ
+        digitalWrite(DIR_PIN, clockwise ? HIGH : LOW);
+      }
 
       // Emit one step pulse
       digitalWrite(STEP_PIN, HIGH);
@@ -114,7 +134,9 @@ void loop() {
 
       // Update position
       step_position += clockwise ? 1 : -1;
-      last_step_us = now;
+
+      // เดิน clock ต่อแบบสะสม ลด jitter
+      last_step_us += step_interval_us;
     }
   }
 }
@@ -129,24 +151,26 @@ bool createEntities() {
 
   rcl_init_options_t init_options = rcl_get_zero_initialized_init_options();
   RCCHECK(rcl_init_options_init(&init_options, allocator));
-  // Put your chosen ROS_DOMAIN_ID here if you use it on the Pi
+  // ใส่ ROS_DOMAIN_ID ให้ตรงกับฝั่ง agent
   rcl_init_options_set_domain_id(&init_options, 96);
 
   RCCHECK(rclc_support_init_with_options(&support, 0, NULL, &init_options, &allocator));
 
   RCCHECK(rclc_node_init_default(&node, "stepper_node", "", &support));
 
-  // Subscriber: /stepper/cmd (Twist)
+  // Subscriber: /galum/stepper (Twist)
   RCCHECK(rclc_subscription_init_default(
     &cmd_sub, &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
-    "/galum/stepper"));
+    "/galum/stepper/angle"));
 
-  // Publisher: /stepper/status (Twist)
-  RCCHECK(rclc_publisher_init_best_effort(
-    &status_pub, &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
-    "/galum/stepper/status"));
+  // Publisher: /galum/stepper/status (Twist)
+  // ใหม่ (Reliable)
+  RCCHECK(rclc_publisher_init_default(
+  &status_pub, &node,
+  ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
+  "/galum/stepper/status"));
+
 
   // Control timer @ 20 ms (50 Hz): publish status & house-keeping
   const unsigned int period_ms = 20;
@@ -167,12 +191,13 @@ bool destroyEntities() {
   rmw_context_t *rmw_ctx = rcl_context_get_rmw_context(&support.context);
   (void)rmw_uros_set_context_entity_destroy_session_timeout(rmw_ctx, 0);
 
-  rcl_timer_fini(&control_timer);
-  rcl_subscription_fini(&cmd_sub, &node);
-  rcl_publisher_fini(&status_pub, &node);
-  rcl_node_fini(&node);
-  rclc_executor_fini(&executor);
-  rclc_support_fini(&support);
+  // ใช้ RCRET_IGNORE เพื่อตัด warning "ignoring return value"
+  RCRET_IGNORE(rcl_timer_fini(&control_timer));
+  RCRET_IGNORE(rcl_subscription_fini(&cmd_sub, &node));
+  RCRET_IGNORE(rcl_publisher_fini(&status_pub, &node));
+  RCRET_IGNORE(rclc_executor_fini(&executor));
+  RCRET_IGNORE(rcl_node_fini(&node));
+  RCRET_IGNORE(rclc_support_fini(&support));
   return true;
 }
 
@@ -180,32 +205,40 @@ bool destroyEntities() {
 void cmdCallback(const void *msgin) {
   const geometry_msgs__msg__Twist *msg = (const geometry_msgs__msg__Twist *)msgin;
 
-  // Command: use linear.x as steps/second (signed)
-  float speed = msg->linear.x;
+  // ใช้ linear.x เป็นความเร็ว steps/s (signed)
+  float speed = (float)msg->linear.x;
 
-  // Limit and translate to interval
+  // Limit
   if (speed >  MAX_ABS_speed) speed =  MAX_ABS_speed;
   if (speed < -MAX_ABS_speed) speed = -MAX_ABS_speed;
 
-  target_speed = speed;
+  target_speed  = speed;
+  dir_clockwise = (target_speed >= 0.0f);
 
   if (target_speed == 0.0f) {
-    // no stepping
     step_interval_us = 1000000;
   } else {
     float interval_f = 1000000.0f / fabsf(target_speed);
     if (interval_f < MIN_STEP_INTERVAL_US) interval_f = MIN_STEP_INTERVAL_US;
     step_interval_us = (uint32_t)interval_f;
   }
+
+  // เริ่มก้าวทันทีหลังได้รับคำสั่ง
+  last_step_us = micros();
+
+  // Debug สั้นๆ
+  Serial.print("[CMD] speed="); Serial.print(target_speed);
+  Serial.print(" dir="); Serial.print(dir_clockwise ? "CW" : "CCW");
+  Serial.print(" us="); Serial.println(step_interval_us);
 }
 
 void controlCallback(rcl_timer_t * /*timer*/, int64_t /*last_call_time*/) {
   // Publish status @ 50 Hz
-  status_msg.linear.x  = (double)step_position;       // position (steps)
-  status_msg.linear.y  = (double)target_speed;          // commanded speed
-  status_msg.angular.z = (double)step_interval_us;    // effective us
+  status_msg.linear.x  = (double)step_position;     // position (steps)
+  status_msg.linear.y  = (double)target_speed;      // commanded speed
+  status_msg.angular.z = (double)step_interval_us;  // effective us
 
-  RCSOFTCHECK(rcl_publish(&status_pub, &status_msg, NULL));
+  RCRET_IGNORE(rcl_publish(&status_pub, &status_msg, NULL));
 }
 
 // -------- Time sync (optional) --------
@@ -218,44 +251,9 @@ void syncTime() {
 
 // -------- Fatal error handling --------
 void rclErrorLoop() {
-  const int LED_PIN = 2; // ESP32 onboard LED (adjust if needed)
   pinMode(LED_PIN, OUTPUT);
   while (1) {
     digitalWrite(LED_PIN, HIGH); delay(100);
     digitalWrite(LED_PIN, LOW);  delay(100);
   }
 }
-
-// void moveStepper(bool clockwise, int steps)
-// {
-//     digitalWrite(DIR_PIN, clockwise ? HIGH : LOW);
-//     for (int i = 0; i < steps; i++)
-//     {
-//         digitalWrite(STEP_PIN, HIGH);
-//         delayMicroseconds(500);
-//         digitalWrite(STEP_PIN, LOW);
-//         delayMicroseconds(500);
-//     }
-// }
-
-// void setup()
-// {
-//     Serial.begin(9600);
-
-//     pinMode(STEP_PIN, OUTPUT);
-//     pinMode(DIR_PIN, OUTPUT);
-
-//     delay(1000);
-//     Serial.println("เริ่มทดสอบ Stepper Motor 1 ตัว...");
-// }
-
-// void loop()
-// {
-//     // หมุนไปข้างหน้า 200 steps
-//     moveStepper(true, 200);
-//     delay(1000);
-
-//     // หมุนกลับหลัง 200 steps
-//     moveStepper(false, 200);
-//     delay(1000);
-// }
