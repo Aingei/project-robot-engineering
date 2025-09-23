@@ -9,23 +9,23 @@
 
 #include <geometry_msgs/msg/twist.h>
 
-// -------- Hardware config -------- 
-#define STEP_PIN 32
+// === ใช้ GPIO driver ที่ไวกว่า digitalWrite ===
+#include "driver/gpio.h"
+
+// มิวเท็กซ์กัน race ระหว่าง loop() กับ callback
+portMUX_TYPE step_mux = portMUX_INITIALIZER_UNLOCKED;
+
+// -------- Hardware config --------
+#define STEP_PIN 25
 #define DIR_PIN  17
 #define LED_PIN   2         // onboard LED (ESP32)
-#define DIR_SETUP_US 20   // หน่วงสั้น ๆ หลังเปลี่ยนทิศ (5–20us ปลอดภัย)
-
+#define DIR_SETUP_US 20     // หน่วงสั้น ๆ หลังเปลี่ยนทิศ (5–20us ปลอดภัย)
 
 // ---- Pulse mode params ----
-#define PULSES_PER_CLICK      50       // กดครั้งเดียว = กี่พัลส์ (ดีฟอลต์)
-#define STEP_RATE_SPS       2000.0f    // ยิงพัลส์กี่ steps/s
-#define MIN_STEP_INTERVAL_US  60       // กันเร็วเกินไปสำหรับไดรเวอร์
-#define STEP_PULSE_US         20       // ความกว้างพัลส์ HIGH
-
-// ---- Step timing (tune these) ----
-#define MAX_ABS_speed          8000.0f   // max |steps/s|
-#define MIN_STEP_INTERVAL_US     60     // clamp fastest to ~6.6 kHz
-#define STEP_PULSE_US            20    // step HIGH width (>=2us for most drivers)
+#define PULSES_PER_CLICK       50      // กดครั้งเดียว = กี่พัลส์ (ดีฟอลต์)
+#define STEP_RATE_SPS        1200.0f   // ยิงพัลส์กี่ steps/s
+#define MIN_STEP_INTERVAL_US   60      // กันเร็วเกินไปสำหรับไดรเวอร์
+#define STEP_PULSE_US           5      // ความกว้างพัลส์ HIGH
 
 // -------- Helpers --------
 #define RCCHECK(fn)  { rcl_ret_t rc = (fn); if (rc != RCL_RET_OK) { rclErrorLoop(); } }
@@ -57,6 +57,7 @@ volatile long     pending_steps     = 0;        // พัลส์ยกค้�
 volatile bool     current_dir_cw    = true;     // ทิศล่าสุดที่กำลังยิง
 uint32_t          step_interval_us  = 500;      // คำนวณจาก STEP_RATE_SPS
 uint32_t          last_step_us      = 0;
+
 // -------- Time sync (optional for stamped msgs) --------
 unsigned long long time_offset = 0;
 
@@ -91,7 +92,7 @@ void setup() {
 void loop() {
   switch (state) {
     case WAITING_AGENT:
-      EXECUTE_EVERY_N_MS(500,
+      EXECUTE_EVERY_N_MS(1000,
         state = (RMW_RET_OK == rmw_uros_ping_agent(100, 1)) ? AGENT_AVAILABLE : WAITING_AGENT;
       );
       digitalWrite(LED_PIN, LOW);
@@ -103,12 +104,13 @@ void loop() {
       break;
 
     case AGENT_CONNECTED:
-      EXECUTE_EVERY_N_MS(200,
+      EXECUTE_EVERY_N_MS(1000,
         state = (RMW_RET_OK == rmw_uros_ping_agent(100, 1)) ? AGENT_CONNECTED : AGENT_DISCONNECTED;
       );
       if (state == AGENT_CONNECTED) {
         digitalWrite(LED_PIN, HIGH);
-        rclc_executor_spin_some(&executor, RCL_MS_TO_NS(5));
+        // ลดเวลาบล็อก เพื่อไม่ให้ขาดพัลส์
+        rclc_executor_spin_some(&executor, RCL_MS_TO_NS(1));
       }
       break;
 
@@ -118,37 +120,47 @@ void loop() {
       break;
   }
 
-  // Non-blocking step generation (driven by micros)
-   // -------- Pulse-per-click stepping --------
-  if (pending_steps != 0) {
+  // -------- Pulse-per-click stepping (non-blocking) --------
+  // ใช้ micros() คุมเฟส และปิด race ด้วย critical section
+  // อ่านค่า pending อย่างปลอดภัย
+  long local_pending;
+  portENTER_CRITICAL(&step_mux);
+  local_pending = pending_steps;
+  portEXIT_CRITICAL(&step_mux);
+
+  if (local_pending != 0) {
     uint32_t now = micros();
     if ((uint32_t)(now - last_step_us) >= step_interval_us) {
 
-      bool want_cw = (pending_steps > 0);
+      bool want_cw = (local_pending > 0);
       static bool prev_cw = true;
 
       // เปลี่ยนทิศ? ตั้ง DIR แล้วดีเลย์ก่อนพัลส์แรกของทิศใหม่
       if (want_cw != prev_cw) {
-        digitalWrite(DIR_PIN, want_cw ? HIGH : LOW);
-        delayMicroseconds(DIR_SETUP_US);
+        gpio_set_level((gpio_num_t)DIR_PIN, want_cw ? 1 : 0);
+        delayMicroseconds(DIR_SETUP_US + 200);   // กันเม็ดแรกพลาดหลังสลับทิศ
         prev_cw = want_cw;
         current_dir_cw = want_cw;
+        last_step_us = micros();                 // บังคับรอ interval ใหม่ก่อนยิงพัลส์แรก
       } else {
-        digitalWrite(DIR_PIN, want_cw ? HIGH : LOW);
+        gpio_set_level((gpio_num_t)DIR_PIN, want_cw ? 1 : 0);
         current_dir_cw = want_cw;
       }
 
-      // ยิงพัลส์ 1 ครั้ง
-      digitalWrite(STEP_PIN, HIGH);
-      delayMicroseconds(STEP_PULSE_US);
-      digitalWrite(STEP_PIN, LOW);
+      // ยิงพัลส์ 1 ครั้ง (ใช้ gpio_set_level แทน digitalWrite เพื่อลด jitter)
+      gpio_set_level((gpio_num_t)STEP_PIN, 1);
+      ets_delay_us(STEP_PULSE_US);
+      gpio_set_level((gpio_num_t)STEP_PIN, 0);
 
-      // อัปเดตตัวนับ
+      // อัปเดตตัวนับอย่างอะตอมมิก
+      portENTER_CRITICAL(&step_mux);
       step_position += current_dir_cw ? 1 : -1;
-      pending_steps += current_dir_cw ? -1 : +1;   // ลดให้เข้าใกล้ศูนย์
+      pending_steps += current_dir_cw ? -1 : +1;
+      local_pending  = pending_steps; // sync กับรอบถัดไป
+      portEXIT_CRITICAL(&step_mux);
 
-      // เดิน clock แบบสะสม ลด jitter
-      last_step_us += step_interval_us;
+      // รีล็อกเฟสด้วยเวลา now ช่วยลดอาการรีบไล่เฟสจนกระตุก
+      last_step_us = now;
     }
   }
 }
@@ -158,7 +170,7 @@ bool createEntities() {
   allocator = rcl_get_default_allocator();
 
   // init messages
-  geometry_msgs__msg__Twist__init(&cmd_msg);  
+  geometry_msgs__msg__Twist__init(&cmd_msg);
   geometry_msgs__msg__Twist__init(&status_msg);
 
   rcl_init_options_t init_options = rcl_get_zero_initialized_init_options();
@@ -170,19 +182,17 @@ bool createEntities() {
 
   RCCHECK(rclc_node_init_default(&node, "stepper_node", "", &support));
 
-  // Subscriber: /galum/stepper (Twist)
+  // Subscriber: /galum/stepper/angle (Twist)
   RCCHECK(rclc_subscription_init_default(
     &cmd_sub, &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
     "/galum/stepper/angle"));
 
-  // Publisher: /galum/stepper/status (Twist)
-  // ใหม่ (Reliable)
+  // Publisher: /galum/stepper/status (Twist) - reliable default
   RCCHECK(rclc_publisher_init_default(
-  &status_pub, &node,
-  ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
-  "/galum/stepper/status"));
-
+    &status_pub, &node,
+    ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
+    "/galum/stepper/status"));
 
   // Control timer @ 20 ms (50 Hz): publish status & house-keeping
   const unsigned int period_ms = 20;
@@ -195,8 +205,11 @@ bool createEntities() {
   RCCHECK(rclc_executor_add_subscription(&executor, &cmd_sub, &cmd_msg, &cmdCallback, ON_NEW_DATA));
   RCCHECK(rclc_executor_add_timer(&executor, &control_timer));
 
+  // รีเซ็ตสถานะ
+  portENTER_CRITICAL(&step_mux);
   pending_steps = 0;
   step_position = 0;
+  portEXIT_CRITICAL(&step_mux);
 
   syncTime();
   return true;
@@ -206,7 +219,6 @@ bool destroyEntities() {
   rmw_context_t *rmw_ctx = rcl_context_get_rmw_context(&support.context);
   (void)rmw_uros_set_context_entity_destroy_session_timeout(rmw_ctx, 0);
 
-  // ใช้ RCRET_IGNORE เพื่อตัด warning "ignoring return value"
   RCRET_IGNORE(rcl_timer_fini(&control_timer));
   RCRET_IGNORE(rcl_subscription_fini(&cmd_sub, &node));
   RCRET_IGNORE(rcl_publisher_fini(&status_pub, &node));
@@ -222,7 +234,9 @@ void cmdCallback(const void *msgin) {
 
   // ปุ่มหยุดฉุกเฉิน / เคลียร์คิว: ส่ง (0,0)
   if (msg->linear.x == 0.0 && msg->linear.y == 0.0) {
+    portENTER_CRITICAL(&step_mux);
     pending_steps = 0;
+    portEXIT_CRITICAL(&step_mux);
     Serial.println("[STOP] clear pending");
     return;
   }
@@ -231,25 +245,31 @@ void cmdCallback(const void *msgin) {
   if (msg->linear.x == 0.0) return;
   bool dir_cw = (msg->linear.x > 0.0);
 
-  // จำนวนพัลส์: รับเฉพาะ >0 เท่านั้น (ไม่ใช้ default อัตโนมัติ)
+  // จำนวนพัลส์: รับเฉพาะ >=20 เท่านั้น กันเม็ดเล็ก ๆ ที่ทำให้ทริกบ่อย
   long pulses = (long) llround(msg->linear.y);
-  if (pulses <= 0) return;
+  if (pulses < 20) return;
 
+  portENTER_CRITICAL(&step_mux);
   if (dir_cw) pending_steps += pulses;
   else        pending_steps -= pulses;
+  portEXIT_CRITICAL(&step_mux);
 
-  Serial.printf("[CLICK] dir=%s add=%ld pending=%ld\n",
-                dir_cw ? "CW" : "CCW", pulses, pending_steps);
+  // Serial.printf("[CLICK] dir=%s add=%ld pending=%ld\n",
+  //               dir_cw ? "CW" : "CCW", pulses, pending_steps);
 }
-
 
 void controlCallback(rcl_timer_t * /*timer*/, int64_t /*last_call_time*/) {
   // Publish status @ 50 Hz
-  status_msg.linear.x  = (double)step_position;     // position (steps)
-  status_msg.linear.y  = (double)pending_steps;      // commanded speed
-  status_msg.angular.z = (double)step_interval_us;  // effective us
-  status_msg.angular.x = (double)555555555555;  // effective us
+  long pos, pend;
+  portENTER_CRITICAL(&step_mux);
+  pos  = step_position;
+  pend = pending_steps;
+  portEXIT_CRITICAL(&step_mux);
 
+  status_msg.linear.x  = (double)pos;              // position (steps)
+  status_msg.linear.y  = (double)pend;             // pending steps (signed)
+  status_msg.angular.z = (double)step_interval_us; // effective us/step
+  status_msg.angular.x = (double)555555555555;     // debug value as-is
 
   RCRET_IGNORE(rcl_publish(&status_pub, &status_msg, NULL));
 }
