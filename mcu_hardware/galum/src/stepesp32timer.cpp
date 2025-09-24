@@ -49,11 +49,6 @@
 #define ACCEL_STEPS_PER_S2    2000.0f
 #define JERK_FILTER_US           50    // จำกัดการเปลี่ยน interval ต่อรอบ (us)
 
-//กันกดปุ่มไม่เท่ากัน
-#define DEBOUNCE_MS          120      // กันเด้ง/กันสแปม (ปรับ 80–200ms ตามนิสัยปุ่ม)
-#define REPEAT_MS               180
-#define FIXED_PULSES_PER_CLICK 50     // กำหนดพัลส์ตายตัวต่อ 1 คลิก
-
 // ------------- Helpers / Macros -------------
 #define RCCHECK(fn)  { rcl_ret_t rc = (fn); if (rc != RCL_RET_OK) { rclErrorLoop(); } }
 #define RCSOFTCHECK(fn) (void)(fn)
@@ -96,11 +91,6 @@ volatile bool     step_high_phase     = false;
 volatile uint32_t current_interval_us = 800;  // ไล่เข้า target
 volatile uint32_t target_interval_us  = 800;  // มาจาก STEP_RATE_SPS หรือคำสั่ง
 volatile uint32_t min_interval_us     = MIN_STEP_INTERVAL_US;
-
-volatile uint32_t last_click_ms = 0;  // เวลา “คลิก” ล่าสุด
-volatile bool     pressed_latch = false; // สถานะกดค้าง (สำหรับ edge detect)
-volatile int8_t   last_dir_sign = 0;    // -1 = CCW, +1 = CW, 0 = ว่าง
-
 
 hw_timer_t* stepTimer = nullptr; //มิวเทคโครงสร้างข้อมูลหรืออ็อบเจกต์ที่ทำหน้าที่เป็น กลไกควบคุมการเข้าถึงทรัพยากรที่ใช้ร่วมกัน กัน race ตอน main/ISR อัปเดต position/pending
 portMUX_TYPE isrMux = portMUX_INITIALIZER_UNLOCKED; //กัน race ตอน main ปรับค่าที่ ISR ใช้ (เช่น target interval, ทิศ)
@@ -323,73 +313,41 @@ bool destroyEntities() {
 void cmdCallback(const void *msgin) {
   const auto *msg = (const geometry_msgs__msg__Twist*) msgin;
 
-  const double x = msg->linear.x;
-  const long   y_raw = (long) llround(msg->linear.y);
-  const uint32_t now_ms = millis();
+  // (0,0) = STOP/clear queue
+  if (msg->linear.x == 0.0 && msg->linear.y == 0.0) {
+    portENTER_CRITICAL(&isrMux);
+    v_pending_steps_isr = 0;
+    portEXIT_CRITICAL(&isrMux);
 
-  // ---- STOP: เคลียร์คิว + ปลด latch ----
-  if (x == 0.0 && y_raw == 0) {
-    portENTER_CRITICAL(&isrMux);   v_pending_steps_isr = 0; portEXIT_CRITICAL(&isrMux);
-    portENTER_CRITICAL(&step_mux); pending_steps = 0;       portEXIT_CRITICAL(&step_mux);
-    pressed_latch = false;
-    last_dir_sign = 0;
+    portENTER_CRITICAL(&step_mux);
+    pending_steps = 0;
+    portEXIT_CRITICAL(&step_mux);
     return;
   }
 
-  // ---- ปล่อยปุ่ม: x==0 -> ปลด latch และรอคลิกใหม่ ----
-  if (x == 0.0) {
-    pressed_latch = false;
-    last_dir_sign = 0;
-    return;
+  // ทิศ: >0 = CW, <0 = CCW, =0 = ไม่เปลี่ยน
+  if (msg->linear.x != 0.0) {
+    bool dir_cw = (msg->linear.x > 0.0);
+    portENTER_CRITICAL(&isrMux);
+    v_dir_cw_isr = dir_cw;
+    portEXIT_CRITICAL(&isrMux);
+
+    portENTER_CRITICAL(&step_mux);
+    current_dir_cw = dir_cw;
+    portEXIT_CRITICAL(&step_mux);
   }
 
-  // ---- มีการกด (x != 0) ----
-  const bool dir_cw = (x > 0.0);
-  const int8_t this_sign = dir_cw ? +1 : -1;
+  // จำนวนพัลส์
+  long pulses = (long) llround(msg->linear.y);
+  if (pulses >= MIN_PULSES_PER_CMD) {
+    queueStepsFromApp(pulses, (msg->linear.x >= 0.0)); // ถ้า x=0 จะถือเป็น CW
+  }
 
-  // ปรับความเร็วเป้าหมายถ้ามีส่งมา
+  // (ทางเลือก) ตั้ง target speed ผ่าน angular.x (steps/s)
   if (msg->angular.x > 0.0) {
     updateTargetIntervalFromRate((float)msg->angular.x);
   }
-
-  // ตั้งทิศทันที (ไม่ต้องรอคิว)
-  portENTER_CRITICAL(&isrMux);  v_dir_cw_isr = dir_cw;  portEXIT_CRITICAL(&isrMux);
-  portENTER_CRITICAL(&step_mux); current_dir_cw = dir_cw; portEXIT_CRITICAL(&step_mux);
-
-  // กำหนดจำนวนพัลส์ต่อคลิก (ถ้า y เล็กไปให้ใช้ค่ามาตรฐาน)
-  long pulses = (y_raw >= MIN_PULSES_PER_CMD) ? y_raw : FIXED_PULSES_PER_CLICK;
-
-  // ---- กรณีเปลี่ยนทิศขณะกดค้าง: ยิงทันทีและรีเซ็ต latch/debounce ----
-  if (last_dir_sign != 0 && this_sign != last_dir_sign) {
-    // reset timing แล้ว "คลิกทันที"
-    last_click_ms = now_ms;
-    queueStepsFromApp(pulses, dir_cw);
-    pressed_latch = true;
-    last_dir_sign = this_sign;
-    return;
-  }
-
-  // ---- Edge + Debounce + Auto-repeat ----
-  if (!pressed_latch) {
-    // คลิกแรกของรอบ: เช็ค debounce
-    if ((uint32_t)(now_ms - last_click_ms) < DEBOUNCE_MS) return;
-    last_click_ms = now_ms;
-    queueStepsFromApp(pulses, dir_cw);
-    pressed_latch = true;
-    last_dir_sign = this_sign;
-    return;
-  } else {
-    // กดค้างอยู่ → ยิงซ้ำตาม REPEAT_MS
-    if ((uint32_t)(now_ms - last_click_ms) >= REPEAT_MS) {
-      last_click_ms = now_ms;
-      queueStepsFromApp(pulses, dir_cw);
-      last_dir_sign = this_sign;
-    }
-    return;
-  }
 }
-
-
 
 void controlCallback(rcl_timer_t * /*timer*/, int64_t /*last_call_time*/) {
   // Publish status @ 50 Hz
