@@ -14,6 +14,8 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob.glob('launch/*.launch.py')),
+        (os.path.join('share', package_name, 'www'),
+            glob.glob('www/*')),
     ],
     
     install_requires=['setuptools'],
@@ -22,7 +24,11 @@ setup(
     maintainer_email='johndoe@example.com',
     description='ROS 2 package for robot control',
     license='MIT',
-    tests_require=['pytest'],
+    # tests_require=['pytest'],
+    extras_require={
+        # optional: install with `pip install .[test]` if you ever need it
+        'test': ['pytest']
+    },
     entry_points={
         'console_scripts': [
             'galum_speed = galum_robot.galum_speed:main',

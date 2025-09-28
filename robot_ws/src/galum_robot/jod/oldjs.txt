@@ -1,0 +1,179 @@
+document.addEventListener('DOMContentLoaded', () => {
+
+const video = document.getElementById('webcam');
+const Sstatus = document.getElementById('status');
+const fpsEl = document.getElementById('fps');
+const leftfrontRPM = document.getElementById('left_front_rpm');
+const rightfrontRPM = document.getElementById('right_front_rpm');
+const leftbackRPM = document.getElementById('left_back_rpm');
+const rightbackRPM = document.getElementById('right_back_rpm');
+
+//add
+// ---- System Stats (/system/stats, std_msgs/String with JSON)
+const cpuBar     = document.getElementById('cpuBar');
+const memBar     = document.getElementById('memBar');
+const cpuTotal   = document.getElementById('cpuTotal');
+const cpuTempEl  = document.getElementById('cpuTemp');
+const cpuCoresEl = document.getElementById('cpuCores');
+const cpuFreqsEl = document.getElementById('cpuFreqs');
+
+const memUsed    = document.getElementById('memUsed');
+const memAvail   = document.getElementById('memAvail');
+const memTotal   = document.getElementById('memTotal');
+
+const l1El       = document.getElementById('l1');
+const l5El       = document.getElementById('l5');
+const l15El      = document.getElementById('l15');
+
+const armClockEl = document.getElementById('armClock');
+const voltsEl    = document.getElementById('volts');
+const thrNowEl   = document.getElementById('throttledNow');
+const thrEverEl  = document.getElementById('throttledEver');
+
+const setStatus = (msg) => { Sstatus.textContent = msg; };
+
+async function startCamera() {
+  try {
+    // ✅ ใส่ resolution & fps
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        frameRate: { ideal: 30 }
+      },
+      audio: false
+    });
+
+    video.srcObject = stream;
+    Sstatus.textContent = 'กล้องพร้อมใช้งาน ✅';
+
+     // ---------- ✅ นับ FPS ----------
+    let frames = 0;
+    let lastTime = performance.now();
+
+    function countVideoFPS(now, metadata) {
+      frames++;
+      if (now - lastTime >= 1000) {
+        fpsEl.textContent = ` Camera FPS: ${frames}`;
+        frames = 0;
+        lastTime = now;
+      }
+      video.requestVideoFrameCallback(countVideoFPS);
+    }
+    video.requestVideoFrameCallback(countVideoFPS);
+
+  } catch (err) {
+    console.error(err);
+    Sstatus.textContent = 'ไม่สามารถเปิดกล้องได้ ❌ ' + err.message;
+  }
+}
+
+startCamera();
+
+
+//Rosbridge
+
+const ros = new ROSLIB.Ros({
+  url: 'ws://172.20.10.3:9090'  // ใส่ IP ของ Pi5
+});
+
+ros.on('connection', () => {
+  console.log('Connected to ROSBridge ✅');
+  Sstatus.textContent = 'เชื่อม ROSBridge สำเร็จ ✅';
+});
+ros.on('error', (err) => {
+  console.error('Error connecting to ROSBridge', err);
+  Sstatus.textContent = 'ไม่สามารถเชื่อม ROSBridge ❌';
+});
+ros.on('close', () => {
+  console.log('Connection to ROSBridge closed');
+  Sstatus.textContent = 'เชื่อม ROSBridge ถูกปิด ❌';
+});
+
+// subscribe topic encoder
+const motorTopic = new ROSLIB.Topic({
+  ros: ros,
+  name: '/galum/debug/cmd_move/rpm',
+  messageType: 'geometry_msgs/Twist' // ใช้ type ตาม ROS ของคุณ
+});
+
+motorTopic.subscribe((msg) => {
+  console.log('Received msg:', msg);
+  leftfrontRPM.textContent = msg.linear.x.toFixed(2);
+  leftbackRPM.textContent  = msg.linear.y.toFixed(2);
+  rightfrontRPM.textContent = msg.angular.x.toFixed(2);
+  rightbackRPM.textContent  = msg.angular.y.toFixed(2);
+});
+
+//add for stats
+function bytesHuman(n){
+  const u = ['B','KB','MB','GB','TB']; let i=0;
+  n = Number(n) || 0;
+  while(n>=1024 && i<u.length-1){ n/=1024; i++; }
+  return n.toFixed(1)+' '+u[i];
+}
+
+const sysTopic = new ROSLIB.Topic({
+  ros: ros,
+  name: '/system/stats',
+  messageType: 'std_msgs/String'
+});
+
+sysTopic.subscribe((msg) => {
+  try {
+    const s = JSON.parse(msg.data);
+
+    // CPU %
+    const total = s?.cpu?.total_percent ?? 0;
+    cpuBar.style.width = total + '%';
+    cpuTotal.textContent = `${total.toFixed(1)} %`;
+
+    // CPU temp
+    const temp = s?.cpu?.temp_c;
+    cpuTempEl.textContent = (temp==null) ? '-' : `${Number(temp).toFixed(1)} °C`;
+
+    // Per-core %
+    const perCore = s?.cpu?.per_core_percent ?? [];
+    cpuCoresEl.textContent = perCore.length
+      ? perCore.map(v => `${Number(v||0).toFixed(0)}%`).join(', ')
+      : '-';
+
+    // Per-core MHz (Pi5 extras)
+    const freqs = s?.pi5?.cpu_freq_mhz ?? [];
+    cpuFreqsEl.textContent = freqs.length
+      ? freqs.map(f => `${Number(f||0).toFixed(0)}MHz`).join(', ')
+      : '-';
+
+    // Memory
+    const memP = s?.memory?.percent ?? 0;
+    memBar.style.width = `${memP}%`;
+    memUsed.textContent  = `${bytesHuman(s?.memory?.used)} (${memP.toFixed(1)}%)`;
+    memAvail.textContent = bytesHuman(s?.memory?.available);
+    memTotal.textContent = bytesHuman(s?.memory?.total);
+
+    // Load avgs
+    l1El.textContent  = (s?.loadavg?.['1min']  ?? 0).toFixed(2);
+    l5El.textContent  = (s?.loadavg?.['5min']  ?? 0).toFixed(2);
+    l15El.textContent = (s?.loadavg?.['15min'] ?? 0).toFixed(2);
+
+    // Pi5 extras
+    const armClk = s?.pi5?.arm_clock_mhz;
+    armClockEl.textContent = (armClk==null) ? '-' : `${Number(armClk).toFixed(0)} MHz`;
+
+    const volts = s?.pi5?.volts;
+    voltsEl.textContent = (volts==null) ? '-' : `${Number(volts).toFixed(3)} V`;
+
+    const thr = s?.pi5?.throttled;
+    if (thr) {
+      thrNowEl.textContent  = `UV:${thr.under_voltage_now||0} Cap:${thr.freq_capped_now||0} Thr:${thr.throttled_now||0}`;
+      thrEverEl.textContent = `UV:${thr.under_voltage_ever||0} Cap:${thr.freq_capped_ever||0} Thr:${thr.throttled_ever||0}`;
+    } else {
+      thrNowEl.textContent = '-';
+      thrEverEl.textContent = '-';
+    }
+
+  } catch (e) {
+    console.error('sysTopic parse error:', e);
+  }
+});
+});

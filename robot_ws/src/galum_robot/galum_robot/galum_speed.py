@@ -61,7 +61,7 @@ class galum_speed(Node):
         
         linear_vel =  msg.linear.x    # forward/backward
         angular_vel = msg.angular.z  # turning rate
-        angular_vel = angular_vel * 5
+        angular_vel = angular_vel * 10
 
         # Compute left and right wheel speeds (in m/s)
         v_left = linear_vel + (angular_vel * self.wheel_base / 2.0)
