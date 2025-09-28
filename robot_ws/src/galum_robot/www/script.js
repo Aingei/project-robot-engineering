@@ -1,0 +1,216 @@
+document.addEventListener('DOMContentLoaded', () => {
+  const video   = document.getElementById('webcam');
+  const Sstatus = document.getElementById('status');
+  const fpsEl   = document.getElementById('fps');
+  
+  // const HOST =
+  //   new URLSearchParams(location.search).get('host') ||
+  //   location.hostname ||
+  //   '172.20.10.3';
+
+  const leftfrontRPM  = document.getElementById('left_front_rpm');
+  const rightfrontRPM = document.getElementById('right_front_rpm');
+  const leftbackRPM   = document.getElementById('left_back_rpm');
+  const rightbackRPM  = document.getElementById('right_back_rpm');
+
+  const cpuTotalEl = document.getElementById('cpuTotal');
+  const cpuTempEl  = document.getElementById('cpuTemp');
+  const cpuCoresEl = document.getElementById('cpuCores');
+  const cpuFreqsEl = document.getElementById('cpuFreqs');
+  const memUsedEl  = document.getElementById('memUsed');
+  const memAvailEl = document.getElementById('memAvail');
+  const memTotalEl = document.getElementById('memTotal');
+  const l1El  = document.getElementById('l1');
+  const l5El  = document.getElementById('l5');
+  const l15El = document.getElementById('l15');
+  const armClockEl = document.getElementById('armClock');
+  const voltsEl    = document.getElementById('volts');
+  const thrNowEl   = document.getElementById('throttledNow');
+  const thrEverEl  = document.getElementById('throttledEver');
+
+  const setStatus = m => { if (Sstatus) Sstatus.textContent = m; };
+  const HLS_SRC = '/stream.m3u8'; // same-origin
+
+  async function startCamera() {
+    if (!video) return console.error('#webcam not found');
+    video.muted = true; video.autoplay = true; video.playsInline = true;
+
+    video.addEventListener('error',   e => console.error('VIDEO error:', e));
+    video.addEventListener('playing', () => console.log('VIDEO playing'));
+    video.addEventListener('waiting', () => console.log('VIDEO buffering'));
+
+    try {
+      if (window.Hls && Hls.isSupported()) {
+        // const hls = new Hls({ lowLatencyMode: true });
+        const hls = new Hls({
+          lowLatencyMode: true,
+          liveSyncDurationCount: 1,
+          liveMaxLatencyDurationCount: 2,
+          maxBufferLength: 3,
+          backBufferLength: 0,
+        });
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => console.log('HLS media attached'));
+        hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+          console.log('HLS manifest parsed, levels:', data?.levels?.length ?? 0);
+          video.play().catch(()=>{});
+        });
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          console.error('HLS error:', data.type, data.details);
+        });
+        hls.loadSource(HLS_SRC);
+        hls.attachMedia(video);
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = HLS_SRC;
+        await video.play();
+      } else {
+        throw new Error('HLS not supported');
+      }
+      setStatus('วิดีโอพร้อมใช้งาน ✅');
+    } catch (err) {
+      console.error('startCamera error:', err);
+      setStatus('เล่นวิดีโอไม่ได้ ❌ ' + err.message);
+    }
+
+    if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+      let frames = 0, last = performance.now();
+      const tick = now => {
+        frames++;
+        if (now - last >= 1000) {
+          if (fpsEl) fpsEl.textContent = `FPS: ${frames}`;
+          frames = 0; last = now;
+        }
+        video.requestVideoFrameCallback(tick);
+      };
+      video.requestVideoFrameCallback(tick);
+    }
+  }
+  startCamera();
+
+  function bytesHuman(n){
+    const u = ['B','KB','MB','GB','TB']; let i=0; n = Number(n)||0;
+    while(n>=1024 && i<u.length-1){ n/=1024; i++; }
+    return n.toFixed(1)+' '+u[i];
+  }
+
+  // ===== ROS (ปิดได้ถ้ายังไม่ใช้) =====
+  if (window.ROSLIB) {
+    const ros = new ROSLIB.Ros({ url: 'ws://papa.local:9090' });
+    //172.20.10.3
+    ros.on('connection', () => console.log('Connected to ROSBridge ✅'));
+    ros.on('error',  e => console.error('ROSBridge error', e));
+    ros.on('close',  () => console.log('ROSBridge closed'));
+  // async function startWebRTC() {
+  //   if (!video) throw new Error('#webcam not found');
+  //   video.muted = true; video.autoplay = true; video.playsInline = true;
+
+  //   const pc = new RTCPeerConnection();
+  //   pc.addTransceiver('video', { direction: 'recvonly' });
+  //   pc.ontrack = (ev) => { if (ev.streams?.[0]) video.srcObject = ev.streams[0]; };
+
+  //   const offer = await pc.createOffer();
+  //   await pc.setLocalDescription(offer);
+
+  //   // 🔹 CHANGED: use HOST here
+  //   const WHEP_URL = `http://${HOST}:8889/whep/cam`;
+  //   const r = await fetch(WHEP_URL, {
+  //     method: 'POST',
+  //     headers: { 'Content-Type': 'application/sdp', 'Accept': 'application/sdp' },
+  //     body: offer.sdp
+  //   });
+  //   if (!r.ok) throw new Error('WHEP HTTP ' + r.status);
+  //   const answerSdp = await r.text();
+  //   await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+
+  //   setStatus('วิดีโอ (WebRTC) พร้อมใช้งาน ✅');
+
+  //   // FPS counter (optional)
+  //   if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+  //     let frames = 0, last = performance.now();
+  //     const tick = now => {
+  //       frames++;
+  //       if (now - last >= 1000) {
+  //         if (fpsEl) fpsEl.textContent = `FPS: ${frames}`;
+  //         frames = 0; last = now;
+  //       }
+  //       video.requestVideoFrameCallback(tick);
+  //     };
+  //     video.requestVideoFrameCallback(tick);
+  //   }
+  // }
+
+  // startWebRTC().catch(err => {
+  //   console.error('WebRTC error:', err);
+  //   setStatus('เล่นวิดีโอไม่ได้ ❌ ' + err.message);
+  // });
+
+  // // ---------- ROSBridge (use same HOST) ----------
+  // if (window.ROSLIB) {
+  //   // 🔹 CHANGED: use HOST here
+  //   const ros = new ROSLIB.Ros({ url: `ws://${HOST}:9090` });
+
+  //   // (optional) auto-reconnect
+  //   let reconnectTimer = null;
+  //   const scheduleReconnect = () => {
+  //     if (reconnectTimer) return;
+  //     reconnectTimer = setTimeout(() => {
+  //       reconnectTimer = null;
+  //       try { ros.connect(`ws://${HOST}:9090`); } catch (e) {}
+  //     }, 2000);
+  //   };
+
+  //   ros.on('connection', () => {
+  //     console.log('Connected to ROSBridge ✅');
+  //     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  //   });
+  //   ros.on('error',  e => { console.error('ROSBridge error', e); scheduleReconnect(); });
+  //   ros.on('close',  () => { console.log('ROSBridge closed'); scheduleReconnect(); });
+
+    const motorTopic = new ROSLIB.Topic({
+      ros, name:'/galum/debug/cmd_move/rpm', messageType:'geometry_msgs/Twist'
+    });
+    motorTopic.subscribe((msg) => {
+      if (leftfrontRPM)  leftfrontRPM.textContent  = Number(msg?.linear?.x ?? 0).toFixed(2);
+      if (leftbackRPM)   leftbackRPM.textContent   = Number(msg?.linear?.y ?? 0).toFixed(2);
+      if (rightfrontRPM) rightfrontRPM.textContent = Number(msg?.angular?.x ?? 0).toFixed(2);
+      if (rightbackRPM)  rightbackRPM.textContent  = Number(msg?.angular?.y ?? 0).toFixed(2);
+    });
+
+    const sysTopic = new ROSLIB.Topic({
+      ros, name:'/system/stats', messageType:'std_msgs/String'
+    });
+    sysTopic.subscribe((msg) => {
+      try {
+        const s = JSON.parse(msg.data || '{}');
+        const total = Number(s?.cpu?.total_percent ?? 0);
+        if (cpuTotalEl) cpuTotalEl.textContent = `${total.toFixed(1)} %`;
+        const temp = s?.cpu?.temp_c;
+        if (cpuTempEl)  cpuTempEl.textContent  = (temp==null) ? '-' : `${Number(temp).toFixed(1)} °C`;
+        const perCore = Array.isArray(s?.cpu?.per_core_percent) ? s.cpu.per_core_percent : [];
+        if (cpuCoresEl) cpuCoresEl.textContent = perCore.length ? perCore.map(v => `${Number(v||0).toFixed(0)}%`).join(', ') : '-';
+        const freqs = Array.isArray(s?.pi5?.cpu_freq_mhz) ? s.pi5.cpu_freq_mhz : [];
+        if (cpuFreqsEl) cpuFreqsEl.textContent = freqs.length ? freqs.map(f => `${Number(f||0).toFixed(0)}MHz`).join(', ') : '-';
+        const memP = Number(s?.memory?.percent ?? 0);
+        if (memUsedEl)  memUsedEl.textContent  = `${bytesHuman(s?.memory?.used)} (${memP.toFixed(1)}%)`;
+        if (memAvailEl) memAvailEl.textContent = bytesHuman(s?.memory?.available);
+        if (memTotalEl) memTotalEl.textContent = bytesHuman(s?.memory?.total);
+        if (l1El)  l1El.textContent  = Number(s?.loadavg?.['1min']  ?? 0).toFixed(2);
+        if (l5El)  l5El.textContent  = Number(s?.loadavg?.['5min']  ?? 0).toFixed(2);
+        if (l15El) l15El.textContent = Number(s?.loadavg?.['15min'] ?? 0).toFixed(2);
+        const armClk = s?.pi5?.arm_clock_mhz;
+        if (armClockEl) armClockEl.textContent = (armClk==null) ? '-' : `${Number(armClk).toFixed(0)} MHz`;
+        const volts = s?.pi5?.volts;
+        if (voltsEl) voltsEl.textContent = (volts==null) ? '-' : `${Number(volts).toFixed(3)} V`;
+        const thr = s?.pi5?.throttled;
+        if (thr) {
+          if (thrNowEl)  thrNowEl.textContent  = `UV:${thr.under_voltage_now||0} Cap:${thr.freq_capped_now||0} Thr:${thr.throttled_now||0}`;
+          if (thrEverEl) thrEverEl.textContent = `UV:${thr.under_voltage_ever||0} Cap:${thr.freq_capped_ever||0} Thr:${thr.throttled_ever||0}`;
+        } else {
+          if (thrNowEl)  thrNowEl.textContent  = '-';
+          if (thrEverEl) thrEverEl.textContent = '-';
+        }
+      } catch (e) {
+        console.error('sysTopic parse error:', e);
+      }
+    });
+  }
+});
