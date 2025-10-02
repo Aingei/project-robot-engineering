@@ -36,15 +36,8 @@ document.addEventListener('DOMContentLoaded', () => {
     video.muted = true; video.autoplay = true; video.playsInline = true;
 
     video.addEventListener('error',   e => console.error('VIDEO error:', e));
-    // video.addEventListener('playing', () => console.log('VIDEO playing'));
-    // video.addEventListener('waiting', () => console.log('VIDEO buffering'));
-    video.addEventListener('waiting', () => {
-      if (!catchingUp) { catchingUp = true; video.playbackRate = 1.05; }
-    })
-    video.addEventListener('playing', () => {
-    // กลับมาที่ 1.00 เมื่อหายสะดุด 1-2 วิ
-      setTimeout(() => { video.playbackRate = 1.00; catchingUp = false; }, 1500);
-    });
+    video.addEventListener('playing', () => console.log('VIDEO playing'));
+    video.addEventListener('waiting', () => console.log('VIDEO buffering'));
 
     try {
       if (window.Hls && Hls.isSupported()) {
@@ -53,9 +46,8 @@ document.addEventListener('DOMContentLoaded', () => {
           lowLatencyMode: true,
           liveSyncDurationCount: 1,
           liveMaxLatencyDurationCount: 2,
-          maxBufferLength: 2,
+          maxBufferLength: 3,
           backBufferLength: 0,
-          maxLiveSyncPlaybackRate: 1.05 
         });
         hls.on(Hls.Events.MEDIA_ATTACHED, () => console.log('HLS media attached'));
         hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {

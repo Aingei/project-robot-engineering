@@ -1,5 +1,0 @@
-http://172.20.10.3:5000/video --> web
-
-python3 camera_stream.py --> run camera
-
-//https://gitlab.com/pannoi_reaicmu/pannoi_web/-/tree/main/src?ref_type=heads 

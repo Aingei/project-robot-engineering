@@ -40,7 +40,15 @@ def generate_launch_description():
         arguments=["serial", "--dev", "/dev/ttyUSB0"],
     )
     
+    node_microros_2 = Node(
+        package="micro_ros_agent",
+        executable="micro_ros_agent",
+        output="screen",
+        arguments=["serial", "--dev", "/dev/ttyUSB1"],
+    )
+    
     ld.add_action(node_microros_1)
+    ld.add_action(node_microros_2)
     ld.add_action(galum_speed)
     ld.add_action(stepper)
 

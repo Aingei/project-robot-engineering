@@ -1,29 +1,28 @@
+<!-- index.html -->
 <!DOCTYPE html>
 <html lang="th">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Camera Webcam</title>
-  <!-- ลิงก์ไปที่ไฟล์ CSS -->
-  <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Galum Robot</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
   <h1>Galum Robot</h1>
 
-  <!-- Section 1: Camera -->
+  <!-- Camera -->
   <section class="camera-section">
     <h2>Camera</h2>
     <div class="camera-frame">
-      <video id="webcam" autoplay playsinline muted disablePictureInPicture></video>
+      <img id="webcam" width="640" height="480" alt="Camera stream"/>
     </div>
     <div id="status" class="status">กำลังเชื่อมกล้อง...</div>
-    <div id="fps" class="fps">FPS: -</div>
   </section>
 
   <!-- Motor -->
   <section class="motor-section">
-    <h2> Motor</h2>
+    <h2>Motor</h2>
     <div class="data">
       <p>Left Front RPM: <span id="left_front_rpm">0</span></p>
       <p>Right Front RPM: <span id="right_front_rpm">0</span></p>
@@ -32,25 +31,18 @@
     </div>
   </section>
 
-  <!-- System Stats (htop-like) -->
+  <!-- System Stats -->
   <section class="stats-min">
     <h2>Status</h2>
     <div class="data">
       <p>CPU Total: <span id="cpuTotal">-- %</span></p>
       <p>CPU Temp: <span id="cpuTemp">-- °C</span></p>
-      <p>Per Core: <span id="cpuCores">--, --, --, --</span></p>
-      <p>Freq (per-core): <span id="cpuFreqs">-- MHz</span></p>
-
+      <p>Per Core: <span id="cpuCores">--</span></p>
+      <p>Freq (per-core): <span id="cpuFreqs">--</span></p>
       <p>Mem Used: <span id="memUsed">--</span></p>
       <p>Mem Avail: <span id="memAvail">--</span></p>
       <p>Mem Total: <span id="memTotal">--</span></p>
-
-      <p>Load 1/5/15m:
-        <span id="l1">--</span> /
-        <span id="l5">--</span> /
-        <span id="l15">--</span>
-      </p>
-
+      <p>Load 1/5/15m: <span id="l1">--</span>/<span id="l5">--</span>/<span id="l15">--</span></p>
       <p>ARM Clock: <span id="armClock">--</span></p>
       <p>Volts: <span id="volts">--</span></p>
       <p>Throttle (now): <span id="throttledNow">--</span></p>
@@ -58,9 +50,10 @@
     </div>
   </section>
 
-  <!-- ลิงก์ไปที่ไฟล์ JS -->
+  <!-- ROSLIB -->
   <script src="https://unpkg.com/roslib/build/roslib.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-  <script src="script.js"></script>
+  <!-- ❗ แก้บรรทัดนี้: ต้องปิด " และปิดแท็ก -->
+  <script src="galumrobot.js"></script>
+
 </body>
 </html>

@@ -1,0 +1,21 @@
+ros2 launch galum_robot web_interface.launch.py rosbridge_port:=9090 web_video_port:=8080
+
+python3 -m http.server 8000 --bind 0.0.0.0
+
+xdg-open 'http://papa.local:8000/?host=papa.local&ws_port=9090&cam_port=8080&topic=/camera/image_raw'
+
+ros2 launch galum_robot web_cam_dashboard.launch.py \
+  rosbridge_port:=9090 web_video_port:=8080 width:=640 height:=480 fps:=30
+
+http://papa.local:8000/src/galum_robot/www/testcam.html
+
+scriptwebrtc
+
+work last
+
+xdg-open http://papa.local:8000/testcam.html?host=papa.local&ws_port=9090&cam_port=8080&topic=/camera/image_raw
+
+ros2 launch galum_robot web_cam_dashboard.launch.py   rosbridge_port:=9090 web_video_port:=8080 width:=640 height:=480 fps:=30
+
+python3 -m http.server 8000 --bind 0.0.0.0 // เปิดใน cd pro/robot/src/galum_robot/www
+
