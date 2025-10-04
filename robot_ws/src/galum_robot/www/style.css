@@ -1,3 +1,4 @@
+/* ----- Base ----- */
 body {
   margin: 0;
   padding: 0;
@@ -14,33 +15,59 @@ h1 {
   margin-bottom: 10px;
 }
 
+/* ----- Dual camera grid ----- */
 .camera-section {
-  display: flex;
-  flex-direction: column;
-  align-items: center; /* กล้อง + status + fps อยู่กลาง */
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 20px;
+  justify-content: center;
+  align-items: start;
+  padding: 10px 20px;
 }
 
-/* Section Camera */
+/* Headings inside camera cards */
 .camera-section h2 {
   text-align: center;
-  margin-left: 20px;
-  color: #3c238e;        /* ปรับสีได้ตามใจ */
+  margin: 6px 0 4px 0;
+  color: #3c238e;
 }
 
+/* Card + controls
+   (support both your custom class names and the generic ones) */
+.camera-card,
+.camera-cardA,
+.camera-cardB {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.camera-controls,
+.camera-controls_A {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 6px 0;
+}
+
+/* ----- Frame box -----
+   Use responsive width, fixed aspect ratio; works for <img> or <video> */
 .camera-frame {
   border: 3px solid #0c0202;
   border-radius: 16px;
-  width: 50vw;
-  max-width: 800px;
-  height: 50vh;
+  width: 100%;           /* fill the grid column */
+  max-width: 640px;      /* don’t get too wide */
+  aspect-ratio: 4 / 3;   /* keep camera shape; replaces fixed height */
   background-color: #222;
   overflow: hidden;
   display: flex;
   justify-content: center;
   align-items: center;
-  margin-top: 20px;
+  margin-top: 8px;
 }
 
+/* MEDIA content inside frame: support both <img> and <video> */
+.camera-frame img,
 .camera-frame video {
   width: 100%;
   height: 100%;
@@ -50,12 +77,14 @@ h1 {
   text-align: center;
 }
 
+/* Status text under each frame */
 .status {
-  margin-top: 10px;
+  margin-top: 8px;
   color: #0f0;
   text-align: center;
 }
 
+/* Optional FPS text style (unused right now) */
 .fps {
   margin-top: 10px;
   color: #0ff;
@@ -63,43 +92,42 @@ h1 {
   text-align: center;
 }
 
+/* ----- Motor section ----- */
 .motor-section {
-  width: 50vw;
-  max-width: 500px;
-  margin: 20px 0;
+  width: min(90vw, 700px);
+  margin: 20px auto;
   display: flex;
-  flex-direction: column; /* วางหัวข้อกับข้อมูลเป็นแนวตั้ง */
+  flex-direction: column;
 }
 
 .motor-section h2 {
   text-align: left;
-  margin-left: 20px;   /* หัวข้อเยื้องจากซ้าย */
+  margin-left: 20px;
   color: #0d0902;
 }
 
 .motor-section .data {
-  margin-left: 40px;   /* ข้อมูลเยื้องเข้ามามากกว่าหัวข้อ */
-  text-align: left;    /* ชิดซ้าย */
+  margin-left: 40px;
+  text-align: left;
   color: #0b0701;
 }
 
-/* === STATS: fixed top-right on pink background === */
+/* ----- Stats panel (fixed, top-right) ----- */
 .stats-min{
-  position: fixed;      /* ลอยคงที่บนหน้าจอ */
-  top: 16px;            /* ระยะจากขอบบน */
-  right: 16px;          /* ระยะจากขอบขวา */
-  width: 260px;         /* กว้างพอดีอ่าน */
-  max-height: 70vh;     /* กันยาวเกินหน้าจอ */
-  overflow: auto;       /* ถ้ายาวให้มีสกอลล์ */
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 260px;
+  max-height: 70vh;
+  overflow: auto;
   padding: 12px 14px;
   border-radius: 10px;
-  background: rgba(0,0,0,.45);   /* พื้นหลังโปร่ง */
-  backdrop-filter: blur(2px);    /* เบลอเบาๆ (ถ้าบราวเซอร์รองรับ) */
+  background: rgba(0,0,0,.45);
+  backdrop-filter: blur(2px);
   box-shadow: 0 6px 16px rgba(0,0,0,.25);
   z-index: 5;
 }
 
-/* สีตัวอักษรในกล่องให้สว่างอ่านง่าย */
 .stats-min h2{
   margin: 0 0 8px 0;
   font-size: 16px;
@@ -112,7 +140,11 @@ h1 {
   line-height: 1.35;
 }
 
-/* ตัวเลือก: บนจอแคบให้ขยับลงนิดกันชน popup/แถบเบราว์เซอร์ */
+/* ----- Responsive: stack cameras on narrow screens ----- */
+@media (max-width: 900px){
+  .camera-section { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 720px){
   .stats-min{ top: 64px; right: 8px; width: 220px; }
 }
