@@ -1,80 +1,180 @@
+// galumrobot.js
+(function(){
+  // ---------- CONFIG ----------
+  const DEFAULTS = {
+    host: 'papa.local',
+    ws_port: '9090',
+    cam_port: '8080',
+    topicA: '/camera/image_raw',
+    topicB: '/camera/image_raw'
+  };
 
-document.addEventListener('DOMContentLoaded', () => {
-  const statusEl = document.getElementById('status');
-  const webcam   = document.getElementById('webcam');
+  const LSKEY = k => 'galum:'+k;
 
-  // -------- Host/port/topic auto config --------
-  const qs   = new URLSearchParams(location.search);
-  const HOST = qs.get('host') || location.hostname || 'papa.local';
-
-  // web_video_server port
-  const CAM_PORT = Number(qs.get('cam_port') || 8080);
-  // rosbridge port
-  const WS_PORT  = Number(qs.get('ws_port')  || 9090);
-
-  // topic (แก้ให้ตรงกับที่คุณ publish จริง ๆ)
-  const TOPIC = qs.get('topic') || '/camera/image_raw';
-  const EXTRA = qs.get('compressed') === '1' ? '&default_transport=compressed' : '';
-
-  // Set camera src (ทดสอบ URL นี้โดยวางในแถบเบราว์เซอร์ได้)
-  const camURL = `http://${HOST}:${CAM_PORT}/stream?topic=${TOPIC}${EXTRA}`;
-  if (webcam) {
-    webcam.src = camURL;
-    webcam.onload  = () => { if (statusEl) statusEl.textContent = 'กล้องพร้อมใช้งาน ✅'; };
-    webcam.onerror = () => {
-      if (statusEl) statusEl.textContent = 'กล้องโหลดไม่ได้ ❌ (เช็ค host/port/topic)';
-      console.error('Camera failed:', camURL);
-    };
+  function readQuery() {
+    const q = new URLSearchParams(location.search);
+    const out = {};
+    for (const k of ['host','ws_port','cam_port','topic','topicA','topicB']) {
+      if (q.has(k) && q.get(k)) out[k] = q.get(k);
+    }
+    // รองรับแบบเก่า ?topic= ใช้เป็น topicA
+    if (out.topic && !out.topicA) out.topicA = out.topic;
+    return out;
   }
 
-  // --- Elements ---
-  const leftfrontRPM  = document.getElementById('left_front_rpm');
-  const rightfrontRPM = document.getElementById('right_front_rpm');
-  const leftbackRPM   = document.getElementById('left_back_rpm');
-  const rightbackRPM  = document.getElementById('right_back_rpm');
+  function loadConfig() {
+    const fromQ = readQuery();
+    const fromLS = {};
+    for (const k of ['host','ws_port','cam_port','topicA','topicB']) {
+      const v = localStorage.getItem(LSKEY(k));
+      if (v && !(k in fromQ)) fromLS[k] = v;
+    }
+    const cfg = {...DEFAULTS, ...fromLS, ...fromQ};
 
-  const cpuTotalEl = document.getElementById('cpuTotal');
-  const cpuTempEl  = document.getElementById('cpuTemp');
-  const cpuCoresEl = document.getElementById('cpuCores');
-  const cpuFreqsEl = document.getElementById('cpuFreqs');
-  const memUsedEl  = document.getElementById('memUsed');
-  const memAvailEl = document.getElementById('memAvail');
-  const memTotalEl = document.getElementById('memTotal');
-  const l1El  = document.getElementById('l1');
-  const l5El  = document.getElementById('l5');
-  const l15El = document.getElementById('l15');
-  const armClockEl = document.getElementById('armClock');
-  const voltsEl    = document.getElementById('volts');
-  const thrNowEl   = document.getElementById('throttledNow');
-  const thrEverEl  = document.getElementById('throttledEver');
+    // ถ้าเปิดจาก 127.0.0.1/localhost แล้วไม่ได้ส่ง host → default เป็น papa.local
+    if (!('host' in fromQ) && (location.hostname === '127.0.0.1' || location.hostname === 'localhost')) {
+      cfg.host = DEFAULTS.host;
+    }
 
-  // ---------- ROSBridge ----------
-  if (window.ROSLIB) {
-    const ros = new ROSLIB.Ros({ url: `ws://${HOST}:${WS_PORT}` });
-    ros.on('connection', () => console.log('Connected to ROSBridge ✅'));
-    ros.on('error',      (e) => console.error('ROSBridge error', e));
-    ros.on('close',      ()  => console.log('ROSBridge closed'));
+    // เซฟกลับ
+    for (const k of Object.keys(cfg)) localStorage.setItem(LSKEY(k), cfg[k]);
 
-    // Motor Topic
+    return cfg;
+  }
+
+  const CFG = loadConfig();
+
+  // เติมค่าใน quick panel
+  const $ = s => document.querySelector(s);
+  $('#cfg_host').value = CFG.host;
+  $('#cfg_ws').value   = CFG.ws_port;
+  $('#cfg_cam').value  = CFG.cam_port;
+
+  $('#cfg_apply').addEventListener('click', ()=>{
+    const host = $('#cfg_host').value.trim();
+    const ws   = $('#cfg_ws').value.trim();
+    const cam  = $('#cfg_cam').value.trim();
+    ['host','ws_port','cam_port'].forEach(k=>localStorage.removeItem(LSKEY(k)));
+    localStorage.setItem(LSKEY('host'), host);
+    localStorage.setItem(LSKEY('ws_port'), ws);
+    localStorage.setItem(LSKEY('cam_port'), cam);
+    const q = new URLSearchParams({...readQuery(), host, ws_port: ws, cam_port: cam});
+    location.search = '?'+q.toString();
+  });
+
+  $('#cfg_clear').addEventListener('click', ()=>{
+    ['host','ws_port','cam_port','topicA','topicB'].forEach(k=>localStorage.removeItem(LSKEY(k)));
+    alert('Cleared localStorage. Reload the page.');
+  });
+
+  // ---------- ROS ----------
+  const rosURL = `ws://${CFG.host}:${CFG.ws_port}`;
+  const camBase = `http://${CFG.host}:${CFG.cam_port}`;
+
+  const badge = document.createElement('div');
+  badge.style.cssText = 'position:fixed;right:8px;bottom:8px;background:#000a;color:#fff;padding:6px 10px;border-radius:8px;font:12px monospace;z-index:9999';
+  badge.textContent = `ROS: ${rosURL} | CAM: ${camBase}`;
+  document.body.appendChild(badge);
+
+  let ros = null;
+
+  function connectROS() {
+    if (!window.ROSLIB) return console.error('ROSLIB not loaded');
+
+    ros = new ROSLIB.Ros({ url: rosURL });
+    ros.on('connection', ()=> console.log('Connected to ROSBridge ✅', rosURL));
+    ros.on('close',      ()=> console.warn('ROSBridge closed'));
+    ros.on('error', e => console.error('ROSBridge error', e));
+  }
+
+  function mjpegURL(topic, compressed) {
+    let url = `${camBase}/stream?topic=${topic}`;   // ❗ ไม่ encode '/' อีกต่อไป
+    if (compressed) url += `&default_transport=compressed`;
+    return url;
+  }
+
+  function setCam(imgId, statusId, topic, compressed) {
+    const img = document.getElementById(imgId);
+    const st  = document.getElementById(statusId);
+    if (!img) return;
+
+    const url = mjpegURL(topic, compressed);
+    img.src = url;
+    if (st) st.textContent = `stream: ${url}`;
+    img.onerror = ()=> st && (st.textContent = 'กล้องโหลดไม่ได้ ❌ ตรวจ host/ports/topic');
+  }
+
+  // ---------- ดึงรายชื่อ topics จาก rosapi ----------
+  function listImageTopics(cb) {
+    // ใช้ rosapi service: /rosapi/topics
+    const srv = new ROSLIB.Service({
+      ros,
+      name: '/rosapi/topics',
+      serviceType: 'rosapi/GetTopics'
+    });
+    srv.callService(new ROSLIB.ServiceRequest({}), (res)=>{
+      const all = res.topics || [];
+      // คัดเฉพาะหัวข้อภาพ
+      const imgs = all.filter(t => /image(_raw|\/compressed)?$/.test(t));
+      cb(imgs.sort());
+    }, (err)=> {
+      console.error('rosapi GetTopics error', err);
+      cb([]);
+    });
+  }
+
+  function populateSelect(selId, topics, currentTopic) {
+    const sel = document.getElementById(selId);
+    if (!sel) return;
+    sel.innerHTML = '';
+    const add = (val, text) => {
+      const opt = document.createElement('option');
+      opt.value = val; opt.textContent = text || val;
+      sel.appendChild(opt);
+    };
+    if (!topics.length) add(currentTopic || '', currentTopic || '(no topics)');
+    topics.forEach(t => add(t));
+    if (currentTopic && topics.includes(currentTopic)) sel.value = currentTopic;
+  }
+
+  // ---------- Motor & System stats subscribers ----------
+  function setupSubs() {
+    const leftfrontRPM  = $('#left_front_rpm');
+    const rightfrontRPM = $('#right_front_rpm');
+    const leftbackRPM   = $('#left_back_rpm');
+    const rightbackRPM  = $('#right_back_rpm');
+
     const motorTopic = new ROSLIB.Topic({
       ros,
       name: '/galum/debug/cmd_move/rpm',
       messageType: 'geometry_msgs/Twist'
     });
-    motorTopic.subscribe((msg) => {
+    motorTopic.subscribe((msg)=>{
       leftfrontRPM.textContent  = Number(msg?.linear?.x  ?? 0).toFixed(2);
       leftbackRPM.textContent   = Number(msg?.linear?.y  ?? 0).toFixed(2);
       rightfrontRPM.textContent = Number(msg?.angular?.x ?? 0).toFixed(2);
       rightbackRPM.textContent  = Number(msg?.angular?.y ?? 0).toFixed(2);
     });
 
-    // System Stats Topic (std_msgs/String JSON)
+    const cpuTotalEl = $('#cpuTotal');
+    const cpuTempEl  = $('#cpuTemp');
+    const cpuCoresEl = $('#cpuCores');
+    const cpuFreqsEl = $('#cpuFreqs');
+    const memUsedEl  = $('#memUsed');
+    const memAvailEl = $('#memAvail');
+    const memTotalEl = $('#memTotal');
+    const l1El = $('#l1'), l5El = $('#l5'), l15El = $('#l15');
+    const armClockEl = $('#armClock');
+    const voltsEl    = $('#volts');
+    const thrNowEl   = $('#throttledNow');
+    const thrEverEl  = $('#throttledEver');
+
     const sysTopic = new ROSLIB.Topic({
       ros,
       name: '/system/stats',
       messageType: 'std_msgs/String'
     });
-    sysTopic.subscribe((msg) => {
+    sysTopic.subscribe((msg)=>{
       try {
         const s = JSON.parse(msg.data || '{}');
         cpuTotalEl.textContent = `${Number(s?.cpu?.total_percent ?? 0).toFixed(1)} %`;
@@ -115,11 +215,52 @@ document.addEventListener('DOMContentLoaded', () => {
           thrNowEl.textContent = '-';
           thrEverEl.textContent = '-';
         }
-      } catch (e) {
-        console.error('System stats parse error:', e);
-      }
+      } catch(e){ console.error('stats parse', e); }
     });
-  } else {
-    console.error('ROSLIB not loaded');
   }
-});
+
+  // ---------- เริ่มทำงาน ----------
+  connectROS();
+
+  // เติม select และ set stream ให้สองกล้อง
+  function initCams(imageTopics) {
+    // A
+    populateSelect('camASelect', imageTopics, CFG.topicA);
+    const aSel = $('#camASelect');
+    const aCmp = $('#camACompressed');
+    // เริ่มต้นสตรีม A
+    setCam('camA', 'camAStatus', aSel.value || CFG.topicA, aCmp.checked);
+    // เปลี่ยนค่าตอนเลือก
+    aSel.addEventListener('change', ()=>{
+      localStorage.setItem(LSKEY('topicA'), aSel.value);
+      setCam('camA', 'camAStatus', aSel.value, aCmp.checked);
+    });
+    aCmp.addEventListener('change', ()=>{
+      setCam('camA', 'camAStatus', aSel.value, aCmp.checked);
+    });
+
+    // B
+    populateSelect('camBSelect', imageTopics, CFG.topicB);
+    const bSel = $('#camBSelect');
+    const bCmp = $('#camBCompressed');
+    setCam('camB', 'camBStatus', bSel.value || CFG.topicB, bCmp.checked);
+    bSel.addEventListener('change', ()=>{
+      localStorage.setItem(LSKEY('topicB'), bSel.value);
+      setCam('camB', 'camBStatus', bSel.value, bCmp.checked);
+    });
+    bCmp.addEventListener('change', ()=>{
+      setCam('camB', 'camBStatus', bSel.value, bCmp.checked);
+    });
+  }
+
+  // รอให้เชื่อม ROS แล้วค่อยเรียก rosapi
+  setTimeout(()=>{
+    if (!ros) return;
+    setupSubs();
+    listImageTopics((topics)=>{
+      // ถ้าไม่มี rosapi ให้ใช้ค่าเดิม
+      if (!topics.length) topics = [CFG.topicA, CFG.topicB].filter(Boolean);
+      initCams(topics);
+    });
+  }, 600);
+})();

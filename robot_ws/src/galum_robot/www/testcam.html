@@ -5,7 +5,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Galum Robot</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=20251005" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
 </head>
 <body>
 
@@ -13,40 +16,38 @@
 
   <!-- Dual Cameras -->
   <section class="camera-section">
-      <div class="camera-cardA">
-        <h2>Camera A</h2>
-        <div class="camera-controls_A">
-          <label>
-            Topic:
-            <select id="camASelect"></select>
-          </label>
-          <label title="Use compressed transport if available">
-            <input type="checkbox" id="camACompressed"> compressed
-          </label>
-        </div>
-        <div class="camera-frame">
-          <img id="camA" width="640" height="480" alt="Camera A stream"/>
-        </div>
-        <div id="camAStatus" class="status">กำลังค้นหากล้อง...</div>
+    <div class="camera-cardA">
+      <h2>Camera A</h2>
+      <div class="camera-controls_A">
+        <label>Topic:
+          <select id="camASelect"></select>
+        </label>
+        <label title="Use compressed transport if available">
+          <input type="checkbox" id="camACompressed"> compressed
+        </label>
       </div>
+      <div class="camera-frame">
+        <img id="camA" width="640" height="480" alt="Camera A stream"/>
+      </div>
+      <div id="camAStatus" class="status">กำลังค้นหากล้อง...</div>
+    </div>
 
-      <div class="camera-cardB">
-        <h2>Camera B</h2>
-        <div class="camera-controls_A">
-          <label>
-            Topic:
-            <select id="camBSelect"></select>
-          </label>
-          <label title="Use compressed transport if available">
-            <input type="checkbox" id="camBCompressed"> compressed
-          </label>
-        </div>
-        <div class="camera-frame">
-          <img id="camB" width="640" height="480" alt="Camera B stream"/>
-        </div>
-        <div id="camBStatus" class="status">กำลังค้นหากล้อง...</div>
+    <div class="camera-cardB">
+      <h2>Camera B</h2>
+      <div class="camera-controls_B">
+        <label>Topic:
+          <select id="camBSelect"></select>
+        </label>
+        <label title="Use compressed transport if available">
+          <input type="checkbox" id="camBCompressed"> compressed
+        </label>
       </div>
-    </section>
+      <div class="camera-frame">
+        <img id="camB" width="640" height="480" alt="Camera B stream"/>
+      </div>
+      <div id="camBStatus" class="status">กำลังค้นหากล้อง...</div>
+    </div>
+  </section>
 
   <!-- Motor -->
   <section class="motor-section">
@@ -78,10 +79,17 @@
     </div>
   </section>
 
-  <!-- ROSLIB -->
-  <script src="https://unpkg.com/roslib/build/roslib.min.js"></script>
-  <!-- ❗ แก้บรรทัดนี้: ต้องปิด " และปิดแท็ก -->
-  <script src="galumrobot.js"></script>
+  <!-- Panel ตั้งค่าเร็ว -->
+  <div id="cfgPanel" style="position:fixed;left:8px;bottom:8px;background:#000a;color:#fff;padding:8px;border-radius:10px;font:12px sans-serif;z-index:9999">
+    host: <input id="cfg_host" size="12">
+    ws: <input id="cfg_ws" size="4">
+    cam: <input id="cfg_cam" size="4">
+    <button id="cfg_apply">Apply</button>
+    <button id="cfg_clear" type="button">ClearLS</button>
+  </div>
 
+  <!-- libs -->
+  <script src="https://unpkg.com/roslib/build/roslib.min.js"></script>
+  <script src="galumrobot.js?v=20251005"></script>
 </body>
 </html>

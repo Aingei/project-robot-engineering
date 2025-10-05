@@ -11,7 +11,7 @@ http://papa.local:8000/src/galum_robot/www/testcam.html
 
 scriptwebrtc
 
-work last
+work //
 
 xdg-open http://papa.local:8000/testcam.html?host=papa.local&ws_port=9090&cam_port=8080&topic=/camera/image_raw
 
@@ -19,3 +19,20 @@ ros2 launch galum_robot web_cam_dashboard.launch.py   rosbridge_port:=9090 web_v
 
 python3 -m http.server 8000 --bind 0.0.0.0 // เปิดใน cd pro/robot/src/galum_robot/www
 
+
+
+check cam
+
+ls -l /dev/cam_*
+sudo nano /etc/udev/rules.d/99-usb-cam.rules
+v4l2-ctl --list-devices
+ls -l /dev/v4l/by-id/
+
+
+"work last 2 cameras" port sever 5500 port web server 8080 rosbridge 9090
+
+onweb google search -> http://papa.local:5500/testcam.html?host=papa.local&ws_port=9090&cam_port=8080
+
+ros2 launch galum_robot web_cam_dashboard.launch.py   max_cams:=2 width:=640 height:=480 fps:=30
+
+python3 -m http.server 5500 ( cd proj/../www )
