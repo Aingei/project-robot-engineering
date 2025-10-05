@@ -96,7 +96,7 @@ def launch_setup(context, *args, **kwargs):
     OVERRIDES = {
         # Logitech C922: MJPG ที่เสถียร
         'cam_front': {
-            'pixel_format': 'YUYV',     # ← MJPG ใช้ได้กับ C922 เท่านั้น
+            'pixel_format': 'MJPEG',     # ← MJPG ใช้ได้กับ C922 เท่านั้น
             'image_size': [1280, 720],
             'time_per_frame': [1, 30],
             
@@ -162,16 +162,20 @@ def launch_setup(context, *args, **kwargs):
             'acceptable_qos_profiles': ['sensor_data', 'default'],
         }],
     ))
+    
 
     return nodes
 
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('rosbridge_port', default_value='9090'),
-        DeclareLaunchArgument('web_video_port', default_value='5500'),  # ค่าเริ่ม 5500 ตามที่ใช้หน้าเว็บ
+        # DeclareLaunchArgument('web_video_port', default_value='5500'),  # ค่าเริ่ม 5500 ตามที่ใช้หน้าเว็บ
+        DeclareLaunchArgument('web_video_port', default_value='8080'),
         DeclareLaunchArgument('width',  default_value='640'),
         DeclareLaunchArgument('height', default_value='480'),
         DeclareLaunchArgument('fps',    default_value='30'),
         DeclareLaunchArgument('max_cams', default_value='2'),
         OpaqueFunction(function=launch_setup),
     ])
+
+

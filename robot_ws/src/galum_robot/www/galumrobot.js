@@ -5,8 +5,8 @@
     host: 'papa.local',
     ws_port: '9090',
     cam_port: '8080',
-    topicA: '/camera/image_raw',
-    topicB: '/camera/image_raw'
+    topicA: '/cameras/cam_front/image_raw',
+    topicB: '/cameras/cam_back/image_raw'
   };
 
   const LSKEY = k => 'galum:'+k;
@@ -31,10 +31,15 @@
     }
     const cfg = {...DEFAULTS, ...fromLS, ...fromQ};
 
-    // ถ้าเปิดจาก 127.0.0.1/localhost แล้วไม่ได้ส่ง host → default เป็น papa.local
-    if (!('host' in fromQ) && (location.hostname === '127.0.0.1' || location.hostname === 'localhost')) {
-      cfg.host = DEFAULTS.host;
+    // ----- แก้จุดปัญหา: อย่าบังคับ papa.local เวลาเปิดจาก localhost -----
+    // เลือก host อัตโนมัติเมื่อไม่ได้ส่งผ่าน ?host= และไม่มีใน localStorage:
+    // - ถ้า location.hostname ไม่ใช่ localhost/127.0.0.1 → ใช้อันนั้น
+    // - ไม่งั้นใช้ 127.0.0.1 (ออฟไลน์ก็วิ่ง loopback ได้)
+    if (!('host' in fromQ) && !('host' in fromLS)) {
+      const lh = (location.hostname || '').toLowerCase();
+      cfg.host = (lh && lh !== 'localhost' && lh !== '127.0.0.1') ? lh : '127.0.0.1';
     }
+    // ---------------------------------------------------------------------
 
     // เซฟกลับ
     for (const k of Object.keys(cfg)) localStorage.setItem(LSKEY(k), cfg[k]);
