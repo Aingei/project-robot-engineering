@@ -5,6 +5,18 @@ from setuptools import setup, find_packages
 
 package_name = 'galum_robot'
 
+# ----- add this helper before setup() -----
+def all_files_in_dir(root_dir):
+    """Recursively collect all files under a directory."""
+    file_list = []
+    for dirpath, _, filenames in os.walk(root_dir):
+        for f in filenames:
+            file_list.append(os.path.join(dirpath, f))
+    return file_list
+
+# Replace only this part dynamically before calling setup()
+www_files = all_files_in_dir('www') if os.path.isdir('www') else []
+
 setup(
     name=package_name,
     version='0.0.0',
@@ -14,8 +26,8 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob.glob('launch/*.launch.py')),
-        (os.path.join('share', package_name, 'www'),
-            glob.glob('www/*')),
+        (os.path.join('share', package_name, 'www'), www_files),
+
     ],
     
     install_requires=['setuptools'],

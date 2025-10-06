@@ -260,12 +260,61 @@
 
   // รอให้เชื่อม ROS แล้วค่อยเรียก rosapi
   setTimeout(()=>{
-    if (!ros) return;
-    setupSubs();
-    listImageTopics((topics)=>{
-      // ถ้าไม่มี rosapi ให้ใช้ค่าเดิม
-      if (!topics.length) topics = [CFG.topicA, CFG.topicB].filter(Boolean);
-      initCams(topics);
-    });
-  }, 600);
+      if (!ros) return;
+      setupSubs();
+      listImageTopics((topics)=>{
+        // ถ้าไม่มี rosapi ให้ใช้ค่าเดิม
+        if (!topics.length) topics = [CFG.topicA, CFG.topicB].filter(Boolean);
+        initCams(topics);
+      });
+    }, 600);
+
+  function updateOverlayB(){
+    const card    = document.querySelector('.camera-cardB');
+    const wrap    = card?.querySelector('.camera-frame');  // ใช้กรอบรูปเป็นอ้างอิง
+    const overlay = card?.querySelector('.overlay');
+    if (!wrap || !overlay) return;
+
+    // เปิดกรอบ debug (ถ้ารกตา ลบบรรทัดนี้ได้)
+    overlay.classList.add('debug-outline');
+
+    const pxPerCm = parseFloat(document.getElementById('pxPerCmB')?.value) || 10;
+    const offsetCm  = parseFloat(document.getElementById('centerOffsetCmB')?.value) || 0;
+
+    // ขนาดเฟรมปัจจุบัน
+    const W  = wrap.clientWidth;
+    const cx = W / 2;
+    const cX  = cx + (offsetCm * pxPerCm);
+
+    // ระยะคงที่ 15 cm
+    const d15 = 15 * pxPerCm;
+
+    // setter ลัด
+    const setLeft = (el, x) => { if (el) el.style.left = `${x}px`; };
+
+    // อ้างอิงเส้น
+    const center = overlay.querySelector('.center-line');
+    const left15 = overlay.querySelector('.side15-line.left');
+    const right15= overlay.querySelector('.side15-line.right');
+
+    // จัดตำแหน่ง
+    + setLeft(center,  cX);
+    + setLeft(left15,  cX - d15);
+    + setLeft(right15, cX + d15);
+
+    // โชว์/ซ่อน overlay ตาม checkbox
+    const show = document.getElementById('toggleOverlayB')?.checked !== false;
+    card.classList.toggle('overlay-hidden', !show);
+  }
+  window.addEventListener('resize', updateOverlayB);
+  document.getElementById('pxPerCmB')?.addEventListener('input', updateOverlayB);
+  document.getElementById('centerOffsetCmB')?.addEventListener('input', updateOverlayB);
+  document.getElementById('toggleOverlayB')?.addEventListener('change', updateOverlayB);
+
+  // เรียกหลังรูปโหลด เพื่อให้ได้ขนาดจริง
+  document.getElementById('camB')?.addEventListener('load', updateOverlayB);
+
+  // กันพลาด: เรียกซ้ำหลังตั้งค่ากล้องเสร็จ
+  setTimeout(updateOverlayB, 1200);
 })();
+
