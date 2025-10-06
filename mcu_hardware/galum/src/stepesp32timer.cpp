@@ -24,11 +24,13 @@
 #include "driver/gpio.h"
 // === Hardware timer (ESP32) ===
 #include "esp32-hal-timer.h"
+#include <ESP32Servo.h>   // แทน <Servo.h>
 
 // ---------------- User Config ----------------
 #define STEP_PIN 25
 #define DIR_PIN  17
 #define LED_PIN   2
+#define SERVO_PIN 26
 
 // ดีเลย์หลังสลับทิศ (us)
 #define DIR_SETUP_US            40
@@ -69,9 +71,14 @@ geometry_msgs__msg__Twist cmd_msg;
 rcl_publisher_t status_pub;     // /galum/stepper/status
 geometry_msgs__msg__Twist status_msg;
 
+rcl_subscription_t servo_sub;                     // <— เพิ่ม
+geometry_msgs__msg__Twist servo_msg;
+
 // ---------------- Agent state machine ----------------
 enum AgentState { WAITING_AGENT, AGENT_AVAILABLE, AGENT_CONNECTED, AGENT_DISCONNECTED };
 AgentState state = WAITING_AGENT;
+
+Servo servo; //
 
 // ---------------- Stepper shared state โชว์สถานะ ----------------
 volatile long step_position = 0;     // ตำแหน่งรวม (นับเป็นสเต็ป)
@@ -102,6 +109,7 @@ bool createEntities();
 bool destroyEntities();
 void controlCallback(rcl_timer_t *timer, int64_t last_call_time);
 void cmdCallback(const void *msgin);
+void servoCallback(const void *msgin);
 
 static inline uint32_t accel_to_dInterval_us(float accel_sps2, uint32_t /*interval_us*/) {
   (void)accel_sps2;
@@ -194,6 +202,11 @@ void setup() {
   Serial.begin(115200);
   set_microros_serial_transports(Serial);
 
+  servo.attach(SERVO_PIN);
+  servo.setPeriodHertz(50);
+  servo.write(90);
+  // ถ้าต้องการคาลิเบรตพัลส์: servo.attach(SERVO_PIN, 500, 2400);
+
   // IO init
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIR_PIN,  OUTPUT);
@@ -252,6 +265,7 @@ bool createEntities() {
 
   geometry_msgs__msg__Twist__init(&cmd_msg);
   geometry_msgs__msg__Twist__init(&status_msg);
+  geometry_msgs__msg__Twist__init(&servo_msg); 
 
   rcl_init_options_t init_options = rcl_get_zero_initialized_init_options();
   RCCHECK(rcl_init_options_init(&init_options, allocator));
@@ -272,6 +286,11 @@ bool createEntities() {
     &status_pub, &node,
     ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
     "/galum/stepper/status"));
+  
+  RCCHECK(rclc_subscription_init_default(
+    &servo_sub, &node,
+    ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
+    "/galum/servo/angle"));
 
   // Control timer @ 50 Hz
   const unsigned int period_ms = 20;
@@ -280,8 +299,9 @@ bool createEntities() {
 
   // Executor
   executor = rclc_executor_get_zero_initialized_executor();
-  RCCHECK(rclc_executor_init(&executor, &support.context, 2, &allocator));
+  RCCHECK(rclc_executor_init(&executor, &support.context, 3, &allocator));
   RCCHECK(rclc_executor_add_subscription(&executor, &cmd_sub, &cmd_msg, &cmdCallback, ON_NEW_DATA));
+  RCCHECK(rclc_executor_add_subscription(&executor, &servo_sub, &servo_msg, &servoCallback, ON_NEW_DATA));
   RCCHECK(rclc_executor_add_timer(&executor, &control_timer));
 
   // รีเซ็ตสถานะ
@@ -302,6 +322,7 @@ bool destroyEntities() {
 
   RCRET_IGNORE(rcl_timer_fini(&control_timer));
   RCRET_IGNORE(rcl_subscription_fini(&cmd_sub, &node));
+  RCRET_IGNORE(rcl_subscription_fini(&servo_sub, &node));
   RCRET_IGNORE(rcl_publisher_fini(&status_pub, &node));
   RCRET_IGNORE(rclc_executor_fini(&executor));
   RCRET_IGNORE(rcl_node_fini(&node));
@@ -370,6 +391,14 @@ void controlCallback(rcl_timer_t * /*timer*/, int64_t /*last_call_time*/) {
   status_msg.angular.x = 0.0;                   // ใช้ช่องนี้เป็นฟรี/ดีบักได้
 
   RCRET_IGNORE(rcl_publish(&status_pub, &status_msg, NULL));
+}
+
+void servoCallback(const void *msgin) {
+  const auto *m = (const geometry_msgs__msg__Twist*) msgin;
+  double deg = m->linear.x;         // รับองศาจาก linear.x
+  if (deg < 0.0)   deg = 0.0;
+  if (deg > 180.0) deg = 180.0;
+  servo.write((int)llround(deg));   // เขียนเซอร์โวทันที
 }
 
 // ---------------- Time sync (optional) ----------------

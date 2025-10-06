@@ -23,6 +23,13 @@ def generate_launch_description():
         # output="screen",
         namespace="",
     )
+    servo = Node(
+        package="galum_robot",
+        executable="servo",
+        name="servo_node_PY",
+        # output="screen",
+        namespace="",
+    )
     
     galum_speed = Node(
         package="galum_robot",
@@ -51,5 +58,6 @@ def generate_launch_description():
     ld.add_action(node_microros_2)
     ld.add_action(galum_speed)
     ld.add_action(stepper)
+    ld.add_action(servo)
 
     return ld

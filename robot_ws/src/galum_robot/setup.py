@@ -36,6 +36,7 @@ setup(
             'joystick_node = galum_robot.joystick_node:main',
             'xbox_node = galum_robot.xbox_node:main',
             'stepper= galum_robot.stepper:main',
+            'servo= galum_robot.servo:main',
 
         ],
     },
