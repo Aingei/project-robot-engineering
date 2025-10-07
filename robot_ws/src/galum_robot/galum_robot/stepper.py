@@ -12,6 +12,11 @@ STEPS_PER_REV = 200           # สเต็ปต่อรอบของมอ
 MICROSTEP     = 16            # ตั้งตามจัมเปอร์ DRV8825 (8, 16, 32, ...)
 DEG_PER_CLICK = 71            # อยากให้ 50° ต่อคลิก (ปรับตามชอบ) (เดี๋ยวไปคำนวณเป็นพัลส์จริงด้วย deg_to_pulses)
 
+# HOLD_BTN_CW  = 5.0
+# HOLD_BTN_CCW = 6.0
+DEFAULT_HOLD_TARGET_SPS = 800.0  # ใช้ถ้าจอยไม่ได้ใส่ angular.x มา
+
+
 def deg_to_pulses(deg: float) -> int:
     pulses = int(round((STEPS_PER_REV * MICROSTEP) * (deg / 360.0)))
     return max(1, pulses)
@@ -44,46 +49,95 @@ class stepper(Node):
         self._pressed: bool = False        # กำลังกดอยู่ไหม (ตามมุมมองเรา)
         self._last_sign: int = 0           # -1=CCW, +1=CW, 0=ปล่อย
         self._last_click_ts: float = 0.0   # เวลา trigger ล่าสุด (monotonic)
+        
+        # NEW: สถานะ “กดค้าง”
+        self._hold_active: bool = False
+        self._hold_sign: int = 0           # -1/ +1
+        self._last_hold_ts: float = 0.0
 
         # ให้ timer เรียกส่ง "เฉพาะเมื่อมีคำสั่งรอ"
         self.create_timer(0.01, self.sendData)
 
     # ---------- รับคำสั่งจากจอย ----------
     def on_cmd(self, msg: Twist):
-        # map ปุ่ม: 3.0 = CW, 4.0 = CCW, ค่าอื่น = ปล่อยปุ่ม
-        if msg.linear.x == 3.0: 
-            sign = +1   # CW
-        elif msg.linear.x == 4.0:
-            sign = -1   # CCW
-        else:
-            # ปล่อยปุ่ม → ปลด latch เคลียร์สถานะกด
+        code = float(msg.linear.x)
+        now  = monotonic()
+
+        # ---------- ไม่ใช่ 3/4/5/6 = ปล่อยทุกปุ่ม ----------
+        if code not in (3.0, 4.0, 5.0, 6.0):
+            if self._hold_active:
+                stop = Twist()
+                stop.linear.x = 0.0
+                stop.linear.y = 0.0
+                self._pending_msg = stop
+                self._hold_active = False
+                self._hold_sign   = 0
+                self.get_logger().info("[HOLD-STOP]")
             self._pressed = False
             self._last_sign = 0
             return
 
-        now = monotonic()
+        # ---------- โหมดกดค้าง: 5=CW, 6=CCW ----------
+        if code in (5.0, 6.0):
+            sign = +1 if code == 5.0 else -1
 
-        # ถ้าสลับทิศขณะกดค้าง ให้ถือเป็น "edge ใหม่" ทันที
+            # ถ้าเปลี่ยนทิศระหว่างค้าง ให้ถือเป็น edge ใหม่
+            if self._hold_active and sign != self._hold_sign:
+                self._hold_active = False
+
+            if not self._hold_active:
+                # debounce hold
+                if (now - self._last_hold_ts) < DEBOUNCE_S:
+                    return
+
+                target_sps = float(msg.angular.x) if msg.angular.x > 0.0 else DEFAULT_HOLD_TARGET_SPS
+
+                out = Twist()
+                out.linear.x = 1.0 if sign > 0 else -1.0   # ทิศ
+                out.linear.y = 0.0                         # y=0 = โหมดต่อเนื่อง
+                out.angular.x = target_sps                 # steps/s เป้าหมาย
+                self._pending_msg = out
+
+                self._hold_active = True
+                self._hold_sign   = sign
+                self._last_hold_ts = now
+
+                self.last_dir_cw = (sign > 0)
+                self.last_pulses = 0
+                self.last_cmd_ts = time()
+
+                self.get_logger().info(f"[HOLD-START] dir={'CW' if sign>0 else 'CCW'}, target_sps={target_sps}")
+            return  # กำลังค้างอยู่แล้วทิศเดิม → ไม่ยิงซ้ำ
+
+        # ---------- โหมดคลิกทีละก้าว: 3=CW, 4=CCW ----------
+        # ถ้ากำลังค้างอยู่แล้วกดคลิก → ส่ง STOP ก่อนเพื่อปิดโหมดต่อเนื่อง
+        if self._hold_active:
+            stop = Twist()
+            stop.linear.x = 0.0
+            stop.linear.y = 0.0
+            self._pending_msg = stop
+            self._hold_active = False
+            self._hold_sign   = 0
+            self.get_logger().info("[HOLD-TO-CLICK] stop first")
+
+        sign = +1 if code == 3.0 else -1
+
+        # สลับทิศระหว่างคลิกค้าง → edge ใหม่
         if self._pressed and sign != self._last_sign:
-            self._pressed = False  # ปลด latch เพื่อให้ยิงครั้งใหม่
-        #ถ้ากำลังกดค้างแล้วเปลี่ยนทิศ ถือเป็น “edge ใหม่” เพื่อให้ยิงครั้งใหม่ทันที (ไม่ต้องรอปล่อยจริง)
+            self._pressed = False
 
-        # ถ้ายังไม่ได้กด (edge: 0 -> non-zero) ให้ยิงหนึ่งครั้ง + debounce
         if not self._pressed:
             if (now - self._last_click_ts) < DEBOUNCE_S:
-                return  # เร็วไป โดน debounce
+                return  # กันเด้ง
 
-            # จำนวน pulses ต่อคลิก (ใช้ y ถ้า >0 ไม่งั้นค่า default)
             y = float(msg.linear.y)
             pulses = int(round(y)) if y > 0.0 else deg_to_pulses(DEG_PER_CLICK)
 
-            # เตรียมแพ็กเก็ต one-shot ไป ESP32
             out = Twist()
-            out.linear.x = 1.0 if sign > 0 else -1.0  # +1=CW, -1=CCW
-            out.linear.y = float(pulses)              # pulses ต่อคลิก
-            self._pending_msg = out                   # ให้ timer ส่งครั้งเดียว
+            out.linear.x = 1.0 if sign > 0 else -1.0
+            out.linear.y = float(pulses)
+            self._pending_msg = out
 
-            # อัปเดตสถานะสำหรับ monitor/log
             self.last_dir_cw = (sign > 0)
             self.last_pulses = pulses
             self.last_cmd_ts = time()
@@ -93,9 +147,6 @@ class stepper(Node):
             self._last_click_ts = now
 
             self.get_logger().info(f"[CLICK] dir={'CW' if sign>0 else 'CCW'}, pulses={pulses}")
-
-        # ถ้ากดค้างและทิศเดิม → ไม่ทำอะไร (ไม่ยิงซ้ำ)
-        # ถ้าอยากให้กดค้างแล้วยิงซ้ำ เหมือนคีย์บอร์ด ให้เพิ่ม auto-repeat ตรงนี้ได้
 
     # ---------- ส่งคำสั่ง (one-shot ผ่าน timer) ----------
     def sendData(self):

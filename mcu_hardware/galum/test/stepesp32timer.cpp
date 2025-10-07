@@ -84,6 +84,7 @@ Servo servo; //
 volatile long step_position = 0;     // ตำแหน่งรวม (นับเป็นสเต็ป)
 volatile long pending_steps = 0;     // งานค้าง (signed)
 volatile bool current_dir_cw = true;
+volatile bool continuous_mode = false;   // ADD: โหมดหมุนต่อเนื่อง
 
 portMUX_TYPE step_mux = portMUX_INITIALIZER_UNLOCKED; // กัน race (main <-> ISR/Callbacks)
 
@@ -143,10 +144,15 @@ void IRAM_ATTR onStepTimer() {
   // สองเฟส: HIGH ช่วง STEP_PULSE_US, LOW ช่วง (interval - STEP_PULSE_US)
   if (!step_high_phase) {
     // ก่อนยกขอบขึ้น ถ้าไม่มีงานก็พัก
-    if (v_pending_steps_isr == 0) {
-      gpio_set_level((gpio_num_t)STEP_PIN, 0);
-      timerAlarmWrite(stepTimer, 1000, true); // idle 1ms
-      return;
+    // if (v_pending_steps_isr == 0) {
+    //   gpio_set_level((gpio_num_t)STEP_PIN, 0);
+    //   timerAlarmWrite(stepTimer, 1000, true); // idle 1ms
+    //   return;
+      bool idle_now = (!continuous_mode && (v_pending_steps_isr == 0));  // CHANGE
+      if (idle_now) {
+        gpio_set_level((gpio_num_t)STEP_PIN, 0);
+        timerAlarmWrite(stepTimer, 1000, true);
+        return;
     }
 
     // ตั้งทิศ ขณะ STEP=LOW
@@ -164,14 +170,27 @@ void IRAM_ATTR onStepTimer() {
     step_high_phase = false;
 
     // อัปเดตตำแหน่ง/คิวฝั่ง main อย่างปลอดภัย
+
     portENTER_CRITICAL_ISR(&step_mux);
     step_position += v_dir_cw_isr ? 1 : -1;
-    pending_steps  += v_dir_cw_isr ? -1 : +1;
+
+    // pending_steps  += v_dir_cw_isr ? -1 : +1;
+    // current_dir_cw  = v_dir_cw_isr;
+    // portEXIT_CRITICAL_ISR(&step_mux);
+
+    // v_pending_steps_isr += v_dir_cw_isr ? -1 : +1;
+
+    // ถ้าเป็นโหมด "คลิก" เท่านั้นที่ไปยุ่ง pending_steps
+    if (!continuous_mode) {                                  // ADD
+      pending_steps  += v_dir_cw_isr ? -1 : +1;
+    }                                                        // ADD
     current_dir_cw  = v_dir_cw_isr;
     portEXIT_CRITICAL_ISR(&step_mux);
 
-    // ลดงานคิวใน ISR ด้วย
-    v_pending_steps_isr += v_dir_cw_isr ? -1 : +1;
+    // ลดคิวเฉพาะโหมด "คลิก"
+    if (!continuous_mode) {                                  // ADD
+      v_pending_steps_isr += v_dir_cw_isr ? -1 : +1;
+    } 
 
     // ไล่ interval เข้า target ให้เนียน
     uint32_t cur = current_interval_us;
@@ -338,6 +357,7 @@ void cmdCallback(const void *msgin) {
   if (msg->linear.x == 0.0 && msg->linear.y == 0.0) {
     portENTER_CRITICAL(&isrMux);
     v_pending_steps_isr = 0;
+    continuous_mode = false;
     portEXIT_CRITICAL(&isrMux);
 
     portENTER_CRITICAL(&step_mux);
@@ -361,7 +381,18 @@ void cmdCallback(const void *msgin) {
   // จำนวนพัลส์
   long pulses = (long) llround(msg->linear.y);
   if (pulses >= MIN_PULSES_PER_CMD) {
+    portENTER_CRITICAL(&isrMux);                // ADD
+    continuous_mode = false;                    // ADD
+    portEXIT_CRITICAL(&isrMux);
+
     queueStepsFromApp(pulses, (msg->linear.x >= 0.0)); // ถ้า x=0 จะถือเป็น CW
+  }
+
+  else if (msg->linear.y == 0.0 && msg->angular.x > 0.0) {   // ADD
+    updateTargetIntervalFromRate((float)msg->angular.x);     // ใช้ความเร็วที่สั่ง
+    portENTER_CRITICAL(&isrMux);
+    continuous_mode = true;                                   // เปิดโหมดต่อเนื่อง
+    portEXIT_CRITICAL(&isrMux);
   }
 
   // (ทางเลือก) ตั้ง target speed ผ่าน angular.x (steps/s)

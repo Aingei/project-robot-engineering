@@ -63,6 +63,7 @@ class Joystick(Node):
         self.maxspeed_stepper: float = 800.0
         
         self.sent_data_timer = self.create_timer(0.01, self.sendData)
+        
 
     def joy(self, msg):
         
@@ -113,12 +114,39 @@ class Joystick(Node):
             
 
             # -------- stepper --------
-        if self.gamepad.button_square:      # ปุ่ม ☐
-            cmd_stepper.linear.x = float(3.0)   # ตามเข็ม
-        elif self.gamepad.button_triangle:      # ปุ่ม △
-            cmd_stepper.linear.x = float(4.0)   # ทวนเข็ม
-        else:
+        # if self.gamepad.button_square:      # ปุ่ม ☐
+            # cmd_stepper.linear.x = float(3.0)   # ตามเข็ม
+        # elif self.gamepad.button_triangle:      # ปุ่ม △
+            # cmd_stepper.linear.x = float(4.0)   # ทวนเข็ม
+        # else:
+        #     cmd_stepper.linear.x = 0.0
+        
+            
+                # -------- stepper --------
+        if self.gamepad.r1:                    # กด R1 = หมุนค้างตามเข็ม
+            cmd_stepper.linear.x = float(5.0)
+            cmd_stepper.linear.y = 0.0          # โหมดต่อเนื่อง
+            cmd_stepper.angular.x = float(self.maxspeed_stepper)  # target speed steps/s
+            self.get_logger().info("[TX] HOLD CW  x=5.0 y=0 angx=%.1f" % cmd_stepper.angular.x)
+
+        elif self.gamepad.l1:                  # กด L1 = หมุนค้างทวนเข็ม
+            cmd_stepper.linear.x = float(6.0)
+            cmd_stepper.linear.y = 0.0
+            cmd_stepper.angular.x = float(self.maxspeed_stepper)
+
+        elif self.gamepad.button_square:       # ปุ่ม ☐ = คลิกตามเข็ม
+            cmd_stepper.linear.x = float(3.0)
+            cmd_stepper.linear.y = 0.0
+            self.get_logger().info("[TX] CLICK CW  x=3.0 y=0")
+
+        elif self.gamepad.button_triangle:     # ปุ่ม △ = คลิกทวนเข็ม
+            cmd_stepper.linear.x = float(4.0)
+            cmd_stepper.linear.y = 0.0
+
+        else:                                  # ไม่กดอะไรเลย = หยุด
             cmd_stepper.linear.x = 0.0
+            cmd_stepper.linear.y = 0.0
+
 
             
         self.pub_move.publish(cmd_vel_move)
