@@ -4,19 +4,19 @@
 /*
 ROBOT ORIENTATION
          FRONT
-    MOTOR1  MOTOR2  (2WD/ACKERMANN)
-    MOTOR3  MOTOR4  (4WD/MECANUM)
+    MOTOR1(A)  MOTOR2(B)  (2WD/ACKERMANN)
+    MOTOR3(C)  MOTOR4(D)  (4WD/MECANUM)
          BACK
 */
 
-#define AIN1 14
-#define AIN2 27
-#define BIN1 33
-#define BIN2 32
-#define CIN1 16
-#define CIN2 17
-#define DIN1 18
-#define DIN2 19
+#define AIN1 17 
+#define AIN2 5
+#define BIN1 32
+#define BIN2 33
+#define CIN1 18
+#define CIN2 19
+#define DIN1 34
+#define DIN2 35
 
 /*
 ROBOT ORIENTATION

@@ -53,6 +53,9 @@ class Joystick(Node):
         self.pub_servo = self.create_publisher(
             Twist, "/galum/servo", qos_profile=qos.qos_profile_system_default
         )
+        self.pub_servoload = self.create_publisher( 
+            Twist, "/galum/servo_load", qos_profile=qos.qos_profile_system_default
+        )
         
         self.create_subscription(
             Joy, '/galum/joy', self.joy, qos_profile=qos.qos_profile_sensor_data # 10
@@ -101,6 +104,7 @@ class Joystick(Node):
         
         cmd_vel_move = Twist()
         cmd_servo = Twist()
+        cmd_servo_load = Twist()
         cmd_stepper = Twist()
 
         cmd_vel_move.linear.x = float(self.gamepad.ly * self.maxspeed)
@@ -112,7 +116,12 @@ class Joystick(Node):
         if self.gamepad.button_circle:
             cmd_servo.linear.x = float(2.0)  #Opened Servo
             
-
+        if self.gamepad.button_share:
+            cmd_servo_load.linear.x = float(8.0)  #Closed Servo
+        if self.gamepad.button_option:
+            cmd_servo_load.linear.x = float(9.0)  #Closed Servo
+        
+            
             # -------- stepper --------
         # if self.gamepad.button_square:      # ปุ่ม ☐
             # cmd_stepper.linear.x = float(3.0)   # ตามเข็ม
@@ -148,7 +157,7 @@ class Joystick(Node):
             cmd_stepper.linear.y = 0.0
 
 
-            
+        self.pub_servoload.publish(cmd_servo_load)    
         self.pub_move.publish(cmd_vel_move)
         self.pub_servo.publish(cmd_servo)
         self.pub_stepper.publish(cmd_stepper)

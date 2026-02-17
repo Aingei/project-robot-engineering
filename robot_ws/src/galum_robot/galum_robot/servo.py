@@ -30,7 +30,7 @@ class servo(Node):
         # timer เรียกทุก 0.5 วิ → หมุน Stepper
         # self.create_timer(0.5, self.auto_rotate)
 
-        self.sent_data_timer = self.create_timer(0.01, self.sendData) 
+        self.sent_data_timer = self.create_timer(0.1, self.sendData)  #adjust slow 0.1
         
     # ---------- ฟังก์ชันหมุน stepper ----------
      
@@ -43,16 +43,35 @@ class servo(Node):
             self.servo_angle = float(90.0)
             
     def sendData(self):
+        # now = time.time()
+        # dt = now - self.previous_time
+        # self.previous_time = now
+        
+        # SPEED = 20.0 # degrees per second
+        
+        # diff = self.servo_angle - self.current_angle
+        # step = SPEED * dt
+        
+        # if abs(diff) <= step:
+        #     self.current_angle = self.servo_angle
+        # else:
+        #     self.current_angle += step if diff > 0 else -step
+        
+        if self.current_angle < self.servo_angle:
+            self.current_angle += 1.0
+        elif self.current_angle > self.servo_angle:
+            self.current_angle -= 1.0
+
+        # limit range
+        self.current_angle = max(0.0, min(180.0, self.current_angle))
+        
         servo_msg = Twist()
-       
-        servo_msg.linear.x = float(self.servo_angle)
-        
-        
+        servo_msg.linear.x = float(self.servo_angle)    
         self.send_robot_servo.publish(servo_msg)
          
 def main(args=None):
     rclpy.init()
-    sub = servo()
+    sub = servo()   
     rclpy.spin(sub)
     rclpy.shutdown()
 

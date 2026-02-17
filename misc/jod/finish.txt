@@ -1,0 +1,10 @@
+1. ros2 launch galum_robot bringup.launch.py
+2. joy..
+3. cd proj/../www -> python3 -m http.server 5500  (on pi5)
+4. on pi5 -> ros2 launch galum_robot web_cam_dashboard.launch.py   max_cams:=2 width:=640 height:=480 fps:=30
+5. on google -> http://papa.local:5500/testcam.html?host=papa.local&ws_port=9090&cam_port=8080
+
+
+ถ้ากล้องด้านบนไม่ได้ 
+http://papa.local:8080/stream?topic=/cameras/cam_front/image_raw  c922
+http://papa.local:8080/stream?topic=/cameras/cam_back/image_raw

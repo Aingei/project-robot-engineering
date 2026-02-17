@@ -49,7 +49,7 @@ setup(
             'xbox_node = galum_robot.xbox_node:main',
             'stepper= galum_robot.stepper:main',
             'servo= galum_robot.servo:main',
-
+            'autowalk = galum_robot.autowalk:main',
         ],
     },
 )
