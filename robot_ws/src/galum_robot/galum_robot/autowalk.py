@@ -5,13 +5,20 @@ from geometry_msgs.msg import Twist
 import time
 from galum_robot.utilize import *
 from galum_robot.controller import *
+from motors_interfaces.msg import Motor
 
 class AutoWalk(Node):
     def __init__(self):
         super().__init__('autowalk')
 
         self.send_robot_speed = self.create_publisher(
-            Twist, "/galum/cmd_move/rpm", 10 )
+            Motor, "/galum/cmd_move/rpm", 10 )
+        
+        self.send_cmd_vel = self.create_publisher(
+            Twist, 
+            "/galum/cmd_vel_monitor",  # ตั้งชื่อ topic ใหม่สำหรับดู
+            10
+        )
         
         self.create_subscription(Twist, "/galum/imu_angle", self.get_robot_angle, 10)
         
@@ -91,13 +98,17 @@ class AutoWalk(Node):
             self.motor3Speed = (self.moveSpeed + rotation) * self.maxSpeed #Left Start Slower
             self.motor4Speed = (self.moveSpeed - rotation) * self.maxSpeed
             
-            self.sendData(self.motor1Speed, self.motor2Speed, self.motor3Speed, self.motor4Speed)
+            self.sendData()
         else:
             # หยุด
-            msg.linear.x  = 0.0
-            msg.linear.y  = 0.0
-            msg.angular.x = 0.0
-            msg.angular.y = 0.0
+            # msg.linear.x  = 0.0
+            # msg.linear.y  = 0.0
+            # msg.angular.x = 0.0
+            # msg.angular.y = 0.0
+            self.motor1Speed  = 0
+            self.motor2Speed  = 0
+            self.motor3Speed  = 0
+            self.motor4Speed  = 0
             self.sendData()
 
             if not self.stopped:
@@ -106,14 +117,23 @@ class AutoWalk(Node):
 
         
     def sendData(self):
-        motorspeed_msg = Twist()
+        motorspeed_msg = Motor()
        
-        motorspeed_msg.linear.x = float(self.motor1Speed) #left front
-        motorspeed_msg.linear.y = float(self.motor2Speed) #right front
-        motorspeed_msg.angular.x = float(self.motor3Speed) #left rear
-        motorspeed_msg.angular.y = float(self.motor4Speed) #right rear
+        motorspeed_msg.motor1 = float(self.motor1Speed) #left front
+        motorspeed_msg.motor2 = float(self.motor2Speed) #right front
+        motorspeed_msg.motor3 = float(self.motor3Speed) #left rear
+        motorspeed_msg.motor4 = float(self.motor4Speed) #right rear
         
         self.send_robot_speed.publish(motorspeed_msg)
+        
+        # ==============================
+        # กล่องที่ 2: ส่งค่าเดินหน้า (Twist)
+        # ==============================
+        twist_msg = Twist()
+        twist_msg.linear.x = float(self.moveSpeed) # บอกว่าเดินหน้าเท่าไหร่
+        twist_msg.angular.z = float(self.turnSpeed) # บอกว่าเลี้ยวเท่าไหร่ (ถ้ามี)
+
+        self.send_cmd_vel.publish(twist_msg)
 
 def main():
     rclpy.init()

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from src.utilize import *
+from galum_robot.utilize import *
 import time
 
 class Controller:
