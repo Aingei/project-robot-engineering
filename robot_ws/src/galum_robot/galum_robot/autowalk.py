@@ -6,6 +6,7 @@ import time
 from galum_robot.utilize import *
 from galum_robot.controller import *
 from motors_interfaces.msg import Motor
+import math
 
 class AutoWalk(Node):
     def __init__(self):
@@ -22,16 +23,20 @@ class AutoWalk(Node):
         
         self.create_subscription(Twist, "/galum/imu_angle", self.get_robot_angle, 10)
         
+        self.create_subscription(Twist, "/galum/encoder", self.encoder_callback, 10)
+        
         self.timer = self.create_timer(0.05, self.loop)
 
         # ===== ปรับตรงนี้ =====
         self.moveSpeed = 10.0        # ความเร็ว
+        self.target_distance = 1.0  # 1 m
         self.walk_time = 10.0      # เดินกี่วินาที
         # =====================
         
         self.turnSpeed = 0.0
 
         self.previous_time = time.time()
+        self.start_time = time.time()
         self.stopped = False
         
         self.yaw = 0.0
@@ -43,12 +48,53 @@ class AutoWalk(Node):
         self.motor3Speed : float = 0
         self.motor4Speed : float = 0
         
+        #Encoder
+        
+        self.wheel_radius = 0.05        # 50mm แปลงเป็นเมตร
+        self.ticks_per_rev = 2640.0       #pulse
+        
+        circumference = 2 * math.pi * self.wheel_radius
+        self.m_per_tick = circumference / self.ticks_per_rev
+        
+        self.prev_ticks = [0, 0, 0, 0]
+        self.total_distance = 0.0
+        self.first_run = True   
         
         self.controller = Controller(kp = 1.0, ki = 0.05, kd = 0.001, errorTolerance= To_Radians(0.5), i_min= -1, i_max= 1)
         
 
         self.get_logger().info('AUTO WALK START')
     
+    def encoder_callback(self, msg):
+        current_ticks = [
+            msg.linear.x,   # FL
+            msg.linear.y,   # FR
+            msg.angular.x,  # RL
+            msg.angular.y   # RR
+        ]
+        
+        if self.first_run:
+            self.prev_ticks = current_ticks
+            self.first_run = False
+            return
+        
+        distances = []
+        
+        for i in range(4):
+            diff = current_ticks[i] - self.prev_ticks[i] # ผลต่าง Tick
+            distance_m = diff * self.m_per_tick              # แปลงเป็นเมตร
+            distances.append(distance_m)
+            
+        avg_left = (distances[0] + distances[2]) / 2.0
+        avg_right = (distances[1] + distances[3]) / 2.0
+        
+        center_distance = (avg_left + avg_right) / 2.0
+        
+        self.total_distance += center_distance
+        
+        self.prev_ticks = current_ticks
+            
+            
     def get_robot_angle(self,msg):
         self.yaw = WrapRads(To_Radians(msg.linear.x))
 
@@ -58,63 +104,69 @@ class AutoWalk(Node):
     def loop(self):
         
         msg = Twist()
-        elapsed = time.time() - self.previous_time
-        # CurrentTime = time.time()
-        
-        # PID
-        # yaw_error = WrapRads(self.yaw_setpoint - self.yaw)
-        # rotation = self.controller.Calculate(WrapRads(self.yaw_setpoint - self.yaw)) 
-        
-        # if self.turnSpeed != 0 or (CurrentTime - self.previous_time < 0.45):
-        #     rotation = self.turnSpeed
-        #     self.yaw_setpoint = self.yaw
-        # else:
-           
-        #     rotation = self.controller.Calculate(WrapRads(self.yaw_setpoint - self.yaw))
-        
-        # if self.moveSpeed == 0 and self.turnSpeed == 0 :
-        #     rotation = 0
-        #     self.yaw_setpoint = self.yaw
-        
-        # self.previous_time = CurrentTime if self.turnSpeed != 0 else self.previous_time
-
-        # self.moveSpeed = msg.linear.x
-        # self.turnSpeed = msg.angular.x 
-
-        # self.turnSpeed = self.turnSpeed / 3
-
+        elapsed = time.time() - self.start_time
             
         # WALK
 
-        if elapsed < self.walk_time:
-            # 1. คำนวณ PID เพื่อหาค่าเลี้ยว (Rotation) มาแก้ทาง
+        # if elapsed < self.walk_time:
+        #     # 1. คำนวณ PID เพื่อหาค่าเลี้ยว (Rotation) มาแก้ทาง
+        #     error = WrapRads(self.yaw_setpoint - self.yaw)
+        #     rotation = self.controller.Calculate(error)
+            
+        #     # เดิน
+        #     # Calculate motor speeds based on move and turn speeds
+        #     self.motor1Speed = (self.moveSpeed + rotation) * self.maxSpeed #Left Start Slower
+        #     self.motor2Speed = (self.moveSpeed - rotation) * self.maxSpeed
+        #     self.motor3Speed = (self.moveSpeed + rotation) * self.maxSpeed #Left Start Slower
+        #     self.motor4Speed = (self.moveSpeed - rotation) * self.maxSpeed
+            
+        #     self.sendData()
+        
+        
+        
+        # else:
+        #     self.motor1Speed  = 0
+        #     self.motor2Speed  = 0
+        #     self.motor3Speed  = 0
+        #     self.motor4Speed  = 0
+        #     self.sendData()
+
+        #     if not self.stopped:
+        #         self.get_logger().info('STOPPED')
+        #         self.stopped = True
+
+        if abs(self.total_distance) < self.target_distance:
             error = WrapRads(self.yaw_setpoint - self.yaw)
             rotation = self.controller.Calculate(error)
             
-            # เดิน
-            # Calculate motor speeds based on move and turn speeds
-            self.motor1Speed = (self.moveSpeed + rotation) * self.maxSpeed #Left Start Slower
-            self.motor2Speed = (self.moveSpeed - rotation) * self.maxSpeed
-            self.motor3Speed = (self.moveSpeed + rotation) * self.maxSpeed #Left Start Slower
-            self.motor4Speed = (self.moveSpeed - rotation) * self.maxSpeed
+            # self.motor1Speed = (self.moveSpeed + rotation) * self.maxSpeed 
+            # self.motor2Speed = (self.moveSpeed - rotation) * self.maxSpeed
+            # self.motor3Speed = (self.moveSpeed + rotation) * self.maxSpeed 
+            # self.motor4Speed = (self.moveSpeed - rotation) * self.maxSpeed
             
+            v_left  = self.moveSpeed + rotation
+            v_right = self.moveSpeed - rotation
+
+            rpm_left  = (v_left  / (2 * math.pi * self.wheel_radius)) * 60.0
+            rpm_right = (v_right / (2 * math.pi * self.wheel_radius)) * 60.0
+
+            self.motor1Speed = rpm_left
+            self.motor3Speed = rpm_left
+            self.motor2Speed = rpm_right
+            self.motor4Speed = rpm_right
+                    
             self.sendData()
+            
         else:
-            # หยุด
-            # msg.linear.x  = 0.0
-            # msg.linear.y  = 0.0
-            # msg.angular.x = 0.0
-            # msg.angular.y = 0.0
             self.motor1Speed  = 0
             self.motor2Speed  = 0
             self.motor3Speed  = 0
             self.motor4Speed  = 0
             self.sendData()
-
+            
             if not self.stopped:
-                self.get_logger().info('STOPPED')
+                print(f"\nSTOPPED! Final Distance: {self.total_distance:.4f} meters")
                 self.stopped = True
-
         
     def sendData(self):
         motorspeed_msg = Motor()

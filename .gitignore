@@ -1,5 +1,34 @@
-galum_venv
-robot_ws/build
-robot_ws/install
-robot_ws/log
+# Python Virtual Environments
+galum_venv/
+venv/
+.venv/
 
+# ROS 2 Workspace folders (General and Specific)
+robot_ws/build/
+robot_ws/install/
+robot_ws/log/
+build/
+install/
+log/
+
+# MCU Hardware / PlatformIO
+mcu_hardware/galum/build/
+mcu_hardware/galum/install/
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Editor & IDEs (VS Code)
+.vscode/
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# Python cache
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# System Files
+.DS_Store
+Thumbs.db
