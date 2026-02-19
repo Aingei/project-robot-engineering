@@ -50,6 +50,7 @@ setup(
             'stepper= galum_robot.stepper:main',
             'servo= galum_robot.servo:main',
             'autowalk = galum_robot.autowalk:main',
+            'apriltag = galum_robot.apriltag:main',
         ],
     },
 )

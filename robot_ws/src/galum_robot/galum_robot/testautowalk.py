@@ -178,15 +178,6 @@ class AutoWalk(Node):
         
         self.send_robot_speed.publish(motorspeed_msg)
         
-        # ==============================
-        # กล่องที่ 2: ส่งค่าเดินหน้า (Twist)
-        # ==============================
-        
-        # twist_msg = Twist()
-        # twist_msg.linear.x = float(self.moveSpeed) 
-        # twist_msg.angular.z = float(self.turnSpeed) 
-
-        # self.send_cmd_vel.publish(twist_msg)
 
 def main():
     rclpy.init()

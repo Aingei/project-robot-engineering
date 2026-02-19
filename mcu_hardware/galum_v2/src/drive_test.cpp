@@ -1,9 +1,8 @@
 #include <Arduino.h>
 #include <Wire.h>
-// #include <cmath>
-
 #include <micro_ros_platformio.h>
 #include <stdio.h>
+// #include <cmath>
 
 #include <rcl/rcl.h>
 #include <rcl/error_handling.h>
@@ -15,10 +14,10 @@
 #include "../config/drivemotor.h"
 
 #include <geometry_msgs/msg/twist.h>
+#include <std_msgs/msg/bool.h>
 
 #include <Adafruit_BNO055.h>
 #include <Adafruit_Sensor.h>
-#include <std_msgs/msg/bool.h>
 
 // -------- Hardware objects --------
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x29);
@@ -180,17 +179,19 @@ void twistCallback(const void *msgin)
  
     prev_cmd_time = millis();
 
-      // Store desired velocities from teleop
-    motor_msg.linear.x  = msg->linear.x;   // Forward/backward (m/s)
-    motor_msg.angular.z = msg->angular.z;  // Rotation (rad/s)
+    // Store desired velocities from teleop
+    motor_msg.linear.x = msg->linear.x;   // FL
+    motor_msg.linear.y = msg->linear.y;   // FR
+    motor_msg.angular.x = msg->angular.x; // RL
+    motor_msg.angular.y = msg->angular.y; // RR
 }
 
 
 bool createEntities()
 {
     allocator = rcl_get_default_allocator();
+    
     geometry_msgs__msg__Twist__init(&encoder_msg);
-
     geometry_msgs__msg__Twist__init(&debug_motor_msg);
 
     init_options = rcl_get_zero_initialized_init_options();
@@ -274,8 +275,15 @@ void Move() {
 
 void publishData()
 {
-    encoder_msg.linear.x = encoderLeft.getCount();
-    encoder_msg.linear.y = encoderRight.getCount();
+    double left_ticks = (double)encoderLeft.getCount();
+    double right_ticks = (double)encoderRight.getCount();
+
+    encoder_msg.linear.x = left_ticks;   // FL
+    encoder_msg.angular.x = left_ticks;  // RL
+
+    encoder_msg.linear.y = right_ticks;  // FR
+    encoder_msg.angular.y = right_ticks; // RR
+
     rcl_publish(&encoder_publisher, &encoder_msg, NULL);
     
     Serial.print("Publishing debug_motor_msg: ");
@@ -312,7 +320,6 @@ struct timespec getTime()
 
 void rclErrorLoop()
 {
-    // Example implementation: blink LED rapidly then reboot or halt
 
     const int LED_PIN = 13;
     pinMode(LED_PIN, OUTPUT);
@@ -324,7 +331,4 @@ void rclErrorLoop()
         digitalWrite(LED_PIN, LOW);
         delay(100);
     }
-
-    // Or, if you want to reboot:
-    // NVIC_SystemReset();  // if supported on your platform
 }
