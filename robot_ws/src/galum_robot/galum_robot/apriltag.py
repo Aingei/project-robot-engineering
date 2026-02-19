@@ -1,71 +1,89 @@
 import cv2
 import pupil_apriltags
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import CompressedImage
 
-# ==========================================
-# 1. ตั้งค่า (Config)
-# ถ้าจะเอาไปใส่หุ่นยนต์วิ่งจริงแล้วไม่อยต่อจอ ให้แก้เป็น False
-SHOW_DEBUG_WINDOW = True  
+class AprilTagCompressedPublisher(Node):
 
-detector = pupil_apriltags.Detector(families='tagStandard52h13')
-cap = cv2.VideoCapture(1)
+    def __init__(self):
+        super().__init__('apriltag_camera_node')
 
-# ==========================================
-# 2. Logic
-def decode_cabbage_data(tag_id):
-    
-    # เปลี่ยนเลข ID เป็นสตริงและเติมเลข 0 ข้างหน้าให้ครบ 5 หลัก (เช่น ID 123 กลายเป็น "00123")
-    s = str(tag_id).zfill(5)
-    if len(s) != 5: return None # ถ้าเลขมั่ว ให้ส่งค่าว่างกลับไป
+        self.publisher = self.create_publisher(
+            CompressedImage,
+            '/camera/image/compressed',
+            10 
+        )
 
-    # ถอดรหัสตามคู่มือ
-    data = {
-        "id": tag_id,
-        "planting_dist": int(s[0:2]),      # AB
-        "gap": {'1':5, '2':10, '3':15 , '4':20 , '5':25}.get(s[2], 0), # C (Mapping)
-        # .get(key, default)  
-        # ถ้าเกิดเหตุการณ์ที่อ่าน Tag มาแล้วเลขหลักที่ 3 ไม่ใช่ 1-5 (เช่น อ่านได้เลข 9 ซึ่งไม่มีในตาราง) โปรแกรมจะไม่ค้าง แต่จะส่งค่า 0
-        "interval": int(s[3:5])            # DE
-    }
-    return data
+        self.detector = pupil_apriltags.Detector(families='tagStandard52h13')
+        self.cap = cv2.VideoCapture(1)
 
-# ==========================================
-# 3. ลูปหลัก (Main Loop)
-while True:
-    ret, frame = cap.read()
-    if not ret: break
-    
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) # แปลงภาพจากสี (BGR) เป็น ขาวดำ (Gray)
-    detections = detector.detect(gray) # สั่งให้ Detector ค้นหา Tag ในภาพ
+        self.timer = self.create_timer(0.05, self.process_frame)
 
-    # processing
-    if detections: #เจอ 1 อัน
-        tag = detections[0] # สมมติเอา Tag แรกที่เจอมาใช้
-        result = decode_cabbage_data(tag.tag_id)
-        
-        if result:
-            
-            # พิมพ์ค่าที่ถอดรหัสได้ออกมาทางหน้าจอ Console
-            print(f"move: distance {result['planting_dist']} | เว้น {result['gap']} | {result['interval']}")
-            
-            # ตัวอย่าง: ส่งค่าเข้าฟังก์ชันควบคุมหุ่น
-            # robot_controller.move(result['planting_dist']) 
-            # ros_publisher.publish(str(result))
-            
-    # show
-    if SHOW_DEBUG_WINDOW:
+        self.get_logger().info("Compressed camera publisher started")
+
+    # ==============================
+    # 🔹 เพิ่มฟังก์ชัน decode ตรงนี้
+    # ==============================
+    def decode_cabbage_data(self, tag_id):
+
+        s = str(tag_id).zfill(5)
+        if len(s) != 5:
+            return None
+
+        data = {
+            "id": tag_id,
+            "planting_dist": int(s[0:2]),
+            "gap": {'1':5, '2':10, '3':15, '4':20, '5':25}.get(s[2], 0),
+            "interval": int(s[3:5])
+        }
+        return data
+
+    # ==============================
+    # 🔹 main processing
+    # ==============================
+    def process_frame(self):
+        ret, frame = self.cap.read()
+        if not ret:
+            self.get_logger().warning("Cannot read camera")
+            return
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        detections = self.detector.detect(gray)
+
         for tag in detections:
-            # วาดกรอบสี่เหลี่ยม
             pts = tag.corners.reshape((-1, 1, 2)).astype(int)
             cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
-            
-            # เขียนตัวเลขบอกบนจอ
-            cv2.putText(frame, f"ID: {tag.tag_id}", 
-                       (pts[0][0][0], pts[0][0][1]-10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-        cv2.imshow('Camera View', frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+            cv2.putText(frame, f"ID: {tag.tag_id}",
+                        (pts[0][0][0], pts[0][0][1]-10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, (0, 255, 0), 2)
 
-cap.release()
-cv2.destroyAllWindows()
+            # 🔥 เพิ่มส่วน decode ตรงนี้
+            result = self.decode_cabbage_data(tag.tag_id)
+
+            if result:
+                self.get_logger().info(
+                    f"move: distance {result['planting_dist']} | "
+                    f"เว้น {result['gap']} | {result['interval']}"
+                )
+
+        # 🔥 encode JPEG
+        success, buffer = cv2.imencode('.jpg', frame)
+        if not success:
+            return
+
+        msg = CompressedImage()
+        msg.format = "jpeg"
+        msg.data = buffer.tobytes()
+
+        self.publisher.publish(msg)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = AprilTagCompressedPublisher()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
