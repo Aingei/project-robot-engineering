@@ -9,14 +9,14 @@ ROBOT ORIENTATION
          BACK
 */
 
-#define AIN1 17 
-#define AIN2 5
-#define BIN1 32
-#define BIN2 33
+#define AIN1 17
+#define AIN2 16
+#define BIN1 25
+#define BIN2 26
 #define CIN1 18
 #define CIN2 19
-#define DIN1 25
-#define DIN2 26
+#define DIN1 32
+#define DIN2 33
 
 /*
 ROBOT ORIENTATION

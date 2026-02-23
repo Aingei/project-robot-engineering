@@ -94,19 +94,19 @@ void setup()
     set_microros_serial_transports(Serial);
     Wire.begin(21,22);
 
-    encoderFL.attachFullQuad(2, 15);
+    encoderFL.attachFullQuad(14, 27);
     encoderFL.clearCount();
 
     // Motor B (FR): 13, 12
-    encoderFR.attachFullQuad(13, 12);
+    encoderFR.attachFullQuad(34, 35);
     encoderFR.clearCount();
 
     // Motor C (RL): 4, 16
-    encoderRL.attachFullQuad(4, 16);
+    encoderRL.attachFullQuad(4, 21);
     encoderRL.clearCount();
 
     // Motor D (RR): 14, 27
-    encoderRR.attachFullQuad(14, 27);
+    encoderRR.attachFullQuad(36, 39);
     encoderRR.clearCount();
 
     bno.begin();

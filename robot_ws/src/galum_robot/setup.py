@@ -51,7 +51,9 @@ setup(
             'servo= galum_robot.servo:main',
             'autowalk = galum_robot.autowalk:main',
             'apriltag = galum_robot.apriltag:main',
-            'test= galum_robot.pi5_apriltag:main',
+            'pi5april= galum_robot.pi5_apriltag:main',
+            'comapril= galum_robot.com_apriltag:main',
+            'testrun= galum_robot.test:main',
         ],
     },
 )

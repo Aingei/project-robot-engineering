@@ -4,3 +4,12 @@ htop check ram
 watch -n 1 free -m
 
 เพิ่มตัวเก้บข้อมูลไว้ใช้ต่อ 
+
+
+update 23 feb 68
+
+htop # check ram
+com_apriltag.py
+pi5_apriltag.py 
+testautowalk.py
+(work ใช้สองอันนี้พอห)
