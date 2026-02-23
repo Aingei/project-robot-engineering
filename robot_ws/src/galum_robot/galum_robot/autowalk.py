@@ -3,34 +3,36 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 import time
+from std_msgs.msg import Float32
 from galum_robot.utilize import *
 from galum_robot.controller import *
 # from motors_interfaces.msg import Motor
 import math
+from rclpy import qos
 
 class AutoWalk(Node):
     def __init__(self):
         super().__init__('autowalk')
 
         self.send_robot_speed = self.create_publisher(
-            Twist, "/galum/cmd_move/rpm", 10 )
+            Twist, "/galum/cmd_move/rpm", qos_profile=qos.qos_profile_system_default )
         
         self.send_cmd_vel = self.create_publisher(
             Twist, 
             "/galum/cmd_vel_monitor",  # ตั้งชื่อ topic ใหม่สำหรับดู
-            10
+            qos_profile=qos.qos_profile_system_default
         )
         
-        self.distance_pub = self.create_publisher(Float32, "/galum/current_distance", 10)
+        self.distance_pub = self.create_publisher(Float32, "/galum/current_distance", qos_profile=qos.qos_profile_system_default)
         
-        self.create_subscription(Twist, "/galum/imu_angle", self.get_robot_angle, 10)
+        self.create_subscription(Twist, "/galum/imu_angle", self.get_robot_angle, qos_profile=qos.qos_profile_sensor_data)
         
-        self.create_subscription(Twist, "/galum/encoder", self.encoder_callback, 10)
+        self.create_subscription(Twist, "/galum/encoder", self.encoder_callback, qos_profile=qos.qos_profile_sensor_data)
         
         self.timer = self.create_timer(0.05, self.loop)
 
         # ===== ปรับตรงนี้ =====
-        self.moveSpeed = 10.0        # ความเร็ว
+        self.moveSpeed = 1.0        # ความเร็ว
         self.target_distance = 1.0  # 1 m
         self.walk_time = 10.0      # เดินกี่วินาที
         # =====================

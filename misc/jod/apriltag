@@ -1,5 +1,6 @@
 ros2 run rqt_image_view rqt_image_view  #show camera not in venv
 ros2 run galum_robot apriltag
 htop check ram
+watch -n 1 free -m
 
 เพิ่มตัวเก้บข้อมูลไว้ใช้ต่อ 

@@ -15,8 +15,8 @@ ROBOT ORIENTATION
 #define BIN2 33
 #define CIN1 18
 #define CIN2 19
-#define DIN1 34
-#define DIN2 35
+#define DIN1 25
+#define DIN2 26
 
 /*
 ROBOT ORIENTATION
