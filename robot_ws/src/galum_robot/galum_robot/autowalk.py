@@ -21,6 +21,8 @@ class AutoWalk(Node):
             10
         )
         
+        self.distance_pub = self.create_publisher(Float32, "/galum/current_distance", 10)
+        
         self.create_subscription(Twist, "/galum/imu_angle", self.get_robot_angle, 10)
         
         self.create_subscription(Twist, "/galum/encoder", self.encoder_callback, 10)

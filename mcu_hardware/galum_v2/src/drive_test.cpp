@@ -21,8 +21,11 @@
 
 // -------- Hardware objects --------
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x29);
-ESP32Encoder encoderLeft;
-ESP32Encoder encoderRight;
+// --- แก้ไข: ประกาศ Encoder 4 ตัว ---
+ESP32Encoder encoderFL; // Front Left (Motor A)
+ESP32Encoder encoderFR; // Front Right (Motor B)
+ESP32Encoder encoderRL; // Rear Left (Motor C)
+ESP32Encoder encoderRR;
 
 // -------- Robot geometry --------
 float wheel_separation = 0.20; // meters between wheels
@@ -91,10 +94,20 @@ void setup()
     set_microros_serial_transports(Serial);
     Wire.begin(21,22);
 
-    encoderLeft.attachFullQuad(17, 5);
-    encoderLeft.clearCount();
-    encoderRight.attachFullQuad(18, 19);
-    encoderRight.clearCount();
+    encoderFL.attachFullQuad(2, 15);
+    encoderFL.clearCount();
+
+    // Motor B (FR): 13, 12
+    encoderFR.attachFullQuad(13, 12);
+    encoderFR.clearCount();
+
+    // Motor C (RL): 4, 16
+    encoderRL.attachFullQuad(4, 16);
+    encoderRL.clearCount();
+
+    // Motor D (RR): 14, 27
+    encoderRR.attachFullQuad(14, 27);
+    encoderRR.clearCount();
 
     bno.begin();
 
@@ -275,21 +288,23 @@ void Move() {
 
 void publishData()
 {
-    double left_ticks = (double)encoderLeft.getCount();
-    double right_ticks = (double)encoderRight.getCount();
+    double fl_ticks = (double)encoderFL.getCount();
+    double fr_ticks = (double)encoderFR.getCount();
+    double rl_ticks = (double)encoderRL.getCount();
+    double rr_ticks = (double)encoderRR.getCount();
 
-    encoder_msg.linear.x = left_ticks;   // FL
-    encoder_msg.angular.x = left_ticks;  // RL
-
-    encoder_msg.linear.y = right_ticks;  // FR
-    encoder_msg.angular.y = right_ticks; // RR
+    encoder_msg.linear.x = fl_ticks;   
+    encoder_msg.linear.y = fr_ticks;   
+    encoder_msg.angular.x = rl_ticks;  
+    encoder_msg.angular.y = rr_ticks;
 
     rcl_publish(&encoder_publisher, &encoder_msg, NULL);
     
-    Serial.print("Publishing debug_motor_msg: ");
-    Serial.print(debug_motor_msg.linear.x);
-    Serial.print(", ");
-    Serial.println(debug_motor_msg.linear.y);
+    Serial.print("Encoder Ticks: ");
+    Serial.print(fl_ticks); Serial.print(", "); // ล้อหน้าซ้าย
+    Serial.print(fr_ticks); Serial.print(", "); // ล้อหน้าขวา
+    Serial.print(rl_ticks); Serial.print(", "); // ล้อหลังซ้าย
+    Serial.println(rr_ticks);
     
     rcl_ret_t ret = rcl_publish(&debug_motor_publisher, &debug_motor_msg, NULL);
     if (ret != RCL_RET_OK) {

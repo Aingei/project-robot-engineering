@@ -55,9 +55,9 @@ def generate_launch_description():
     )
     
     ld.add_action(node_microros_1)
-    ld.add_action(node_microros_2)
-    ld.add_action(galum_speed)
-    ld.add_action(stepper)
-    ld.add_action(servo)
+    # ld.add_action(node_microros_2)
+    # ld.add_action(galum_speed)
+    # ld.add_action(stepper)
+    # ld.add_action(servo)
 
     return ld
