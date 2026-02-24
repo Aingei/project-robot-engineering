@@ -53,6 +53,7 @@ setup(
             'apriltag = galum_robot.apriltag:main',
             'pi5april= galum_robot.pi5_apriltag:main',
             'comapril= galum_robot.com_apriltag:main',
+            'complot= galum_robot.com_camera_plot:main',
             'testrun= galum_robot.test:main',
         ],
     },
