@@ -18,7 +18,7 @@ class AprilTagFollower(Node):
         
         # --- Subscribers (รับภาพจาก Pi) ---
         self.create_subscription(
-            CompressedImage, '/camera/stream', self.process_frame, 10)
+            CompressedImage, '/camera/stream', self.process_frame, qos_profile=qos.qos_profile_sensor_data)
 
         # --- Setup Detector ---
         self.detector = pupil_apriltags.Detector(families='tagStandard52h13')

@@ -15,10 +15,10 @@ class AutoWalk(Node):
 
         # --- Publishers ---
         self.send_robot_speed = self.create_publisher(
-            Twist, "/galum/cmd_move/rpm", qos_profile=qos.qos_profile_system_default 
+            Twist, "/galum/cmd_move/rpm", 10 
         )
         self.distance_pub = self.create_publisher(
-            Float32, "/galum/current_distance", qos_profile=qos.qos_profile_system_default
+            Float32, "/galum/current_distance", qos_profile=qos.qos_profile_sensor_data
         )
         
         # --- Subscribers ---

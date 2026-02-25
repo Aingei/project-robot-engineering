@@ -1,150 +1,147 @@
 #!/usr/bin/env python3
-# Save as: pc_vision_sender.py (Run on PC)
 import cv2
 import numpy as np
+import math
 import pupil_apriltags
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import Float32MultiArray
 from ultralytics import YOLO
+# from rclpy.qos import qos_profile_sensor_data
+from rclpy import qos
 
-class PCVisionSender(Node):
+class PCVisionCombined(Node):
     def __init__(self):
-        super().__init__('pc_vision_sender')
+        super().__init__('pc_vision_combined')
 
         # --- Settings ---
-        self.yolo_model = "rack.pt"  # ชื่อ Model แปลงของคุณ
+        self.yolo_model = "rack.pt" 
         
-        # --- Pub/Sub ---
-        # รับภาพจาก Pi
-        self.create_subscription(CompressedImage, '/camera/stream', self.process_frame, 10)
+        # 1. รับภาพ AprilTag
+        self.create_subscription(CompressedImage, '/camera/stream', self.process_april, qos_profile=qos.qos_profile_sensor_data)
         
-        # ส่งข้อมูลที่ประมวลผลแล้วกลับไป Pi (รวมทุกอย่างใน array เดียว)
-        self.data_pub = self.create_publisher(Float32MultiArray, '/galum/vision_packet', 10)
+        # 2. รับภาพ YOLO
+        self.create_subscription(CompressedImage, '/camera/stream/plot', self.process_yolo, qos_profile=qos.qos_profile_sensor_data)
+        
+        # Publisher
+        self.data_pub = self.create_publisher(Float32MultiArray, '/galum/vision_packet', qos_profile=qos.qos_profile_sensor_data)
+        self.create_timer(0.05, self.send_packet)
 
-        # --- AI Setup ---
+        # AI
         self.at_detector = pupil_apriltags.Detector(families='tagStandard52h13')
+        self.get_logger().info("Loading YOLO to GPU...")
         self.model = YOLO(self.yolo_model)
         
-        self.get_logger().info("PC Vision Started: AprilTag + YOLO Mode")
+        # Variables
+        self.tag_found = 0.0
+        self.tag_error = 0.0
+        self.tag_size = 0.0
+        self.plant_dist = 0.0
+        self.plant_gap = 0.0
+        self.plant_interval = 0.0
+        self.yolo_lat_error = 0.0   
 
-    def decode_tag(self, tag_id):
-        # ถอดรหัส 40115 -> 40, 1(5cm), 15
-        s = str(int(tag_id)).zfill(5)
+        self.get_logger().info("PC Vision Combined Started (Horizontal Line Mode)")
+
+    def decode_cabbage_data(self, tag_id):
+        s = str(tag_id).zfill(5)
         if len(s) != 5: return 0, 0, 0
-        
-        first_dist = int(s[0:2])  # 40
-        gap_code = s[2]           # 1
-        interval = int(s[3:5])    # 15
-        
-        gap_cm = {'1':5, '2':10, '3':15, '4':20, '5':25}.get(gap_code, 0)
-        
-        return first_dist, gap_cm, interval
+        p_dist = int(s[0:2])
+        gap = {'1':5, '2':10, '3':15, '4':20, '5':25}.get(s[2], 0)
+        interval = int(s[3:5])
+        return p_dist, gap, interval
 
-    def process_frame(self, msg):
+    def process_april(self, msg):
         np_arr = np.frombuffer(msg.data, np.uint8)
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         if frame is None: return
 
-        height, width, _ = frame.shape
-        center_x = width // 2
-
-        # ===========================
-        # 1. Process AprilTag
-        # ===========================
+        center_x = frame.shape[1] // 2
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         detections = self.at_detector.detect(gray)
         
-        tag_found = 0.0
-        tag_error = 0.0
-        tag_size = 0.0
-        val_first = 0.0
-        val_gap = 0.0
-        val_interval = 0.0
-
+        found = 0.0
         if detections:
-            tag = max(detections, key=lambda x: x.decision_margin) # เอาอันชัดสุด
-            tag_found = 1.0
+            tag = max(detections, key=lambda x: x.decision_margin)
+            found = 1.0
+            self.tag_error = float(center_x - int(tag.center[0]))
+            self.tag_size = float(abs(tag.corners[1][0] - tag.corners[0][0]))
             
-            # คำนวณ Error
-            tag_cx = int(tag.center[0])
-            tag_error = float(center_x - tag_cx)
-            
-            # คำนวณ Size (ความกว้าง)
-            pts = tag.corners
-            width_px = abs(pts[1][0] - pts[0][0])
-            tag_size = float(width_px)
-            
-            # ถอดรหัส
-            val_first, val_gap, val_interval = self.decode_tag(tag.tag_id)
+            p_dist, gap, interval = self.decode_cabbage_data(tag.tag_id)
+            self.plant_dist = float(p_dist)
+            self.plant_gap = float(gap)
+            self.plant_interval = float(interval)
 
-            # Debug Draw
-            cv2.polylines(frame, [pts.astype(int)], True, (0, 255, 0), 2)
-            cv2.putText(frame, f"CODE: {tag.tag_id}", (tag_cx, int(tag.center[1])), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-
-        # ===========================
-        # 2. Process YOLO (Row)
-        # ===========================
-        # ใช้ Track เพื่อความนิ่ง
-        results = self.model.track(frame, persist=True, verbose=False, device='cpu') 
+            cv2.polylines(frame, [tag.corners.astype(int)], True, (0, 255, 0), 2)
+            cv2.putText(frame, f"Dist:{p_dist} Gap:{gap}", (int(tag.center[0]), int(tag.center[1])), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
         
-        row_error = 0.0
-        # row_found เช็คจาก detections
-        
-        if results[0].boxes:
-            # หาแปลงที่ใกล้กลางจอที่สุด (เหมือนโค้ดเดิมของคุณ)
-            boxes = results[0].boxes
-            min_dist = 9999
-            target_x = center_x
-            
-            for box in boxes:
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                box_cx = (x1 + x2) / 2
-                dist = abs(center_x - box_cx)
-                
-                if dist < min_dist:
-                    min_dist = dist
-                    # Logic เดิม: เลือกขอบที่ใกล้
-                    d_left = abs(center_x - x1)
-                    d_right = abs(center_x - x2)
-                    offset = 180 # ระยะห่างจากแปลง
-                    
-                    if d_left < d_right: 
-                        target_x = x1 - offset # เกาะขอบซ้าย
-                    else:
-                        target_x = x2 + offset # เกาะขอบขวา
-            
-            row_error = float(center_x - target_x)
-            
-            # Debug Draw YOLO
-            annotated_frame = results[0].plot()
-            cv2.imshow("PC Vision", annotated_frame) # โชว์รูปที่มี YOLO
-        else:
-            cv2.imshow("PC Vision", frame) # โชว์รูป Tag
-
+        self.tag_found = found
+        cv2.imshow("Cam 1: AprilTag", frame)
         cv2.waitKey(1)
 
-        # ===========================
-        # 3. Send Packet to Pi
-        # ===========================
-        # Packet Structure: [TagFound, TagErr, TagSize, RowErr, FirstDist, Gap, Interval]
+    def process_yolo(self, msg):
+        np_arr = np.frombuffer(msg.data, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        if frame is None: return
+
+        height, width = frame.shape[:2]
+        cam_cx = width // 2
+        
+        # รัน YOLO (device=0 คือ GPU)
+        results = self.model.track(frame, persist=True, device=0, imgsz=320, verbose=False)
+        annotated_frame = results[0].plot()
+        
+        lat_err = 0.0
+
+        if results[0].boxes:
+            closest_box = None
+            min_dist = 9999
+            
+            for box in results[0].boxes:
+                cx, cy, w, h = box.xywh[0].tolist()
+                if abs(cam_cx - cx) < min_dist:
+                    min_dist = abs(cam_cx - cx)
+                    closest_box = box
+
+            if closest_box:
+                cx, cy, w, h = closest_box.xywh[0].tolist()
+                
+                # คำนวณ Error (ระยะห่างซ้ายขวาเหมือนเดิม เพื่อให้หุ่นเดินตรง)
+                lat_err = cx - cam_cx 
+                
+                # 🔥 เปลี่ยนการวาด: วาดเส้นแนวนอนผ่านจุดศูนย์กลางของกล่อง
+                cv2.line(annotated_frame, (0, int(cy)), (width, int(cy)), (0, 255, 0), 2)
+                
+                # วาดจุดกลางจอ
+                cv2.circle(annotated_frame, (cam_cx, int(cy)), 5, (0,0,255), -1)
+                
+                # แสดงค่า Error
+                cv2.putText(annotated_frame, f"Lat Err: {int(lat_err)}", (20, 50), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+        self.yolo_lat_error = float(lat_err)
+        
+        cv2.imshow("Cam 2: YOLO", annotated_frame)
+        cv2.waitKey(1)
+
+    def send_packet(self):
         msg_out = Float32MultiArray()
         msg_out.data = [
-            tag_found,      # 0
-            tag_error,      # 1
-            tag_size,       # 2
-            row_error,      # 3
-            float(val_first), # 4 (40cm)
-            float(val_gap),   # 5 (5cm)
-            float(val_interval) # 6 (15cm)
+            float(self.tag_found),
+            float(self.tag_error),
+            float(self.tag_size),
+            float(self.yolo_lat_error),
+            float(self.plant_dist),
+            float(self.plant_gap),
+            float(self.plant_interval)
         ]
         self.data_pub.publish(msg_out)
 
 def main(args=None):
     rclpy.init(args=args)
-    node = PCVisionSender()
+    node = PCVisionCombined()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt: pass

@@ -2,14 +2,15 @@ import cv2
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import CompressedImage
+from rclpy import qos
 
 class PiCameraSender(Node):
     def __init__(self):
         super().__init__('pi_camera_sender')
        
         # Publisher
-        self.publisher_april = self.create_publisher(CompressedImage, '/camera/stream', 10)
-        self.publisher_plot = self.create_publisher(CompressedImage, '/camera/stream/plot', 10)
+        self.publisher_april = self.create_publisher(CompressedImage, '/camera/stream',qos_profile=qos.qos_profile_sensor_data )
+        self.publisher_plot = self.create_publisher(CompressedImage, '/camera/stream/plot', qos_profile=qos.qos_profile_sensor_data)
         
         # --- Auto Find Camera Index ---
         self.get_logger().info("Scanning for cameras...")

@@ -15,7 +15,7 @@ class YoloProcessor(Node):
             CompressedImage,
             '/camera/stream/plot',
             self.process_frame,
-            10
+            qos_profile=qos.qos_profile_sensor_data
         )
         
         self.get_logger().info("Loading YOLO model...")

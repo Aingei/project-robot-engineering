@@ -14,7 +14,7 @@ class PCProcessor(Node):
             CompressedImage,
             '/camera/stream',
             self.process_frame,
-            10
+            qos_profile=qos.qos_profile_sensor_data
         )
 
         self.detector = pupil_apriltags.Detector(families='tagStandard52h13')
