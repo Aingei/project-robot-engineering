@@ -15,7 +15,7 @@ class PCVisionCombined(Node):
         super().__init__('pc_vision_combined')
 
         # --- Settings ---
-        self.yolo_model = "rack.pt" 
+        self.yolo_model = "rack02.pt" 
         
         # 🔥 เพิ่ม 1: ตั้งค่าขนาดป้ายจริง และ ค่ากล้อง
         # สำคัญ! ต้องวัดขนาดสี่เหลี่ยมดำของป้ายจริง หน่วยเป็นเมตร (เช่น 4cm = 0.04)
@@ -48,6 +48,10 @@ class PCVisionCombined(Node):
         self.plant_gap = 0.0
         self.plant_interval = 0.0
         self.yolo_lat_error = 0.0   
+        
+        # ตัวแปรเก็บภาพ
+        self.img_april = None
+        self.img_yolo = None
         
         # 🔥 เพิ่ม 2: ตัวแปรเก็บระยะทางจริง (แกน Z)
         self.z_dist = 0.0
@@ -99,8 +103,9 @@ class PCVisionCombined(Node):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         
         self.tag_found = found
-        cv2.imshow("Cam 1: AprilTag", frame)
-        cv2.waitKey(1)
+        # cv2.imshow("Cam 1: AprilTag", frame)
+        # cv2.waitKey(1)
+        self.img_april = frame
 
     def process_yolo(self, msg):
         np_arr = np.frombuffer(msg.data, np.uint8)
@@ -137,8 +142,16 @@ class PCVisionCombined(Node):
 
         self.yolo_lat_error = float(lat_err)
         
-        cv2.imshow("Cam 2: YOLO", annotated_frame)
-        cv2.waitKey(1)
+        # cv2.imshow("Cam 2: YOLO", annotated_frame)
+        # cv2.waitKey(1)
+        self.img_yolo = annotated_frame
+    
+    #size on window
+    def resize_for_stack(self, img, target_h=640):
+        h, w = img.shape[:2]
+        ratio = target_h / float(h)
+        target_w = int(w * ratio)
+        return cv2.resize(img, (target_w, target_h))
 
     def send_packet(self):
         msg_out = Float32MultiArray()
@@ -154,6 +167,23 @@ class PCVisionCombined(Node):
             float(self.z_dist) # <--- ตัวที่ 8 (index 7)
         ]
         self.data_pub.publish(msg_out)
+        
+        if (self.img_april is not None) and (self.img_yolo is not None):
+            # 1. ปรับขนาดให้สูงเท่ากัน (เช่น 360px)
+            v1 = self.resize_for_stack(self.img_april, 640)
+            v2 = self.resize_for_stack(self.img_yolo, 640)
+            
+            # 2. รวมภาพแนวนอน
+            combined = np.hstack((v1, v2))
+            
+            # 3. โชว์
+            cv2.imshow("Galum Robot Vision", combined)
+            cv2.waitKey(1)
+        
+        # กรณีภาพมาแค่อันเดียว (กัน Error)
+        elif self.img_april is not None:
+             cv2.imshow("Galum Robot Vision", self.img_april)
+             cv2.waitKey(1)
 
 def main(args=None):
     rclpy.init(args=args)
