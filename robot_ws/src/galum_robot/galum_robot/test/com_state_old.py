@@ -8,6 +8,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import Float32MultiArray
 from ultralytics import YOLO
+# from rclpy.qos import qos_profile_sensor_data
 from rclpy import qos
 
 class PCVisionCombined(Node):
@@ -17,14 +18,6 @@ class PCVisionCombined(Node):
         # --- Settings ---
         self.yolo_model = "rack.pt" 
         
-        # 🔥 เพิ่ม 1: ตั้งค่าขนาดป้ายจริง และ ค่ากล้อง
-        # สำคัญ! ต้องวัดขนาดสี่เหลี่ยมดำของป้ายจริง หน่วยเป็นเมตร (เช่น 4cm = 0.04)
-        self.TAG_REAL_SIZE = 0.07  
-        
-        # ค่ากล้อง [fx, fy, cx, cy] (ประมาณการสำหรับภาพ 640x480)
-        # ถ้าใช้ภาพเล็ก 320x240 ให้หารเลขพวกนี้ครึ่งนึง (เช่น [300, 300, 160, 120])
-        self.camera_params = [600, 600, 320, 240] 
-
         # 1. รับภาพ AprilTag
         self.create_subscription(CompressedImage, '/camera/stream', self.process_april, qos_profile=qos.qos_profile_sensor_data)
         
@@ -48,11 +41,8 @@ class PCVisionCombined(Node):
         self.plant_gap = 0.0
         self.plant_interval = 0.0
         self.yolo_lat_error = 0.0   
-        
-        # 🔥 เพิ่ม 2: ตัวแปรเก็บระยะทางจริง (แกน Z)
-        self.z_dist = 0.0
 
-        self.get_logger().info("PC Vision Combined Started (3D Pose Mode)")
+        self.get_logger().info("PC Vision Combined Started (Horizontal Line Mode)")
 
     def decode_cabbage_data(self, tag_id):
         s = str(tag_id).zfill(5)
@@ -69,12 +59,7 @@ class PCVisionCombined(Node):
 
         center_x = frame.shape[1] // 2
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        
-        # 🔥 แก้ 3: ใส่ parameter เพื่อคำนวณระยะ 3D
-        detections = self.at_detector.detect(gray, 
-                                             estimate_tag_pose=True, 
-                                             camera_params=self.camera_params, 
-                                             tag_size=self.TAG_REAL_SIZE)
+        detections = self.at_detector.detect(gray)
         
         found = 0.0
         if detections:
@@ -83,20 +68,14 @@ class PCVisionCombined(Node):
             self.tag_error = float(center_x - int(tag.center[0]))
             self.tag_size = float(abs(tag.corners[1][0] - tag.corners[0][0]))
             
-            # 🔥 แก้ 4: ดึงค่าระยะแกน Z (ความลึก)
-            self.z_dist = float(tag.pose_t[2][0]) 
-            
             p_dist, gap, interval = self.decode_cabbage_data(tag.tag_id)
             self.plant_dist = float(p_dist)
             self.plant_gap = float(gap)
             self.plant_interval = float(interval)
 
             cv2.polylines(frame, [tag.corners.astype(int)], True, (0, 255, 0), 2)
-            
-            # แสดงค่าบนจอ
-            text = f"Dist:{p_dist} Z-Range:{self.z_dist:.2f}m"
-            cv2.putText(frame, text, (int(tag.center[0]), int(tag.center[1])), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            cv2.putText(frame, f"Dist:{p_dist} Gap:{gap}", (int(tag.center[0]), int(tag.center[1])), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
         
         self.tag_found = found
         cv2.imshow("Cam 1: AprilTag", frame)
@@ -128,10 +107,17 @@ class PCVisionCombined(Node):
 
             if closest_box:
                 cx, cy, w, h = closest_box.xywh[0].tolist()
+                
+                # คำนวณ Error (ระยะห่างซ้ายขวาเหมือนเดิม เพื่อให้หุ่นเดินตรง)
                 lat_err = cx - cam_cx 
                 
+                # 🔥 เปลี่ยนการวาด: วาดเส้นแนวนอนผ่านจุดศูนย์กลางของกล่อง
                 cv2.line(annotated_frame, (0, int(cy)), (width, int(cy)), (0, 255, 0), 2)
+                
+                # วาดจุดกลางจอ
                 cv2.circle(annotated_frame, (cam_cx, int(cy)), 5, (0,0,255), -1)
+                
+                # แสดงค่า Error
                 cv2.putText(annotated_frame, f"Lat Err: {int(lat_err)}", (20, 50), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
@@ -142,7 +128,6 @@ class PCVisionCombined(Node):
 
     def send_packet(self):
         msg_out = Float32MultiArray()
-        # 🔥 แก้ 5: เพิ่ม self.z_dist เป็นตัวสุดท้าย
         msg_out.data = [
             float(self.tag_found),
             float(self.tag_error),
@@ -150,8 +135,7 @@ class PCVisionCombined(Node):
             float(self.yolo_lat_error),
             float(self.plant_dist),
             float(self.plant_gap),
-            float(self.plant_interval),
-            float(self.z_dist) # <--- ตัวที่ 8 (index 7)
+            float(self.plant_interval)
         ]
         self.data_pub.publish(msg_out)
 

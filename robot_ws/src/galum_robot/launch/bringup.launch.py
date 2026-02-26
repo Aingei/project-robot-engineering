@@ -72,8 +72,8 @@ def generate_launch_description():
     )
     
     ld.add_action(node_microros_1)
-    ld.add_action(pi5_state)
-    ld.add_action(send_camera)
+    # ld.add_action(pi5_state)
+    # ld.add_action(send_camera)
     # ld.add_action(node_microros_2)
     # ld.add_action(galum_speed)
     # ld.add_action(stepper)

@@ -19,38 +19,40 @@ class RobotMaster(Node):
     def __init__(self):
         super().__init__('robot_master')
 
-        # Config
+        # --- Config ---
         self.wheel_radius = 0.05
         self.ticks_per_rev = 7436
         self.m_per_tick = (2 * math.pi * self.wheel_radius) / self.ticks_per_rev
         
         self.walk_speed = 0.4        
         
-        # 🔥 แก้ 1: ลดขนาดเหลือ 80 (เพราะภาพเราเล็ก 320x240)
-        self.stop_tag_size = 110      
+        # 🔥 แก้ 1: ระยะหยุดห่างจากป้าย (หน่วยเมตร)
+        # 0.60 = 60 cm (ปรับตามความเหมาะสม)
+        self.stop_distance_threshold = 0.60 
         
         self.kp_tag = 0.15           
         self.kp_row = 0.003          
 
         # Variables
         self.state = STATE_SEARCH
-        self.target_dist = 0.0       
+        
+        # 🔥 แก้ 2: ตัวแปรเป้าหมายระยะทาง (Default 0.5 เมตร เผื่อไม่เจอ)
+        self.target_m = 0.5 
         
         # Vision Data
         self.tag_found = False
         self.tag_err = 0.0
         self.tag_size = 0.0
-        self.yolo_lat_err = 0.0      
+        self.yolo_lat_err = 0.0
+        
+        # 🔥 แก้ 3: ตัวแปรเก็บระยะห่างจริง (Z-Dist)
+        self.current_z_dist = 0.0
         
         # Encoder & Timer
         self.total_dist = 0.0
         self.prev_ticks = [0,0,0,0]
         self.first_run = True
         self.pause_start_time = 0.0
-        
-        # 🔥 เพิ่มตัวแปรจำค่าล่าสุด กันป้ายหลุด
-        self.last_tag_size = 0.0
-        
         self.turn_start_time = 0.0
 
         # ROS
@@ -59,20 +61,29 @@ class RobotMaster(Node):
         self.create_subscription(Twist, "/galum/encoder", self.encoder_cb, qos_profile=qos.qos_profile_sensor_data)
         
         self.create_timer(0.05, self.control_loop)
-        self.get_logger().info("Robot Master Started (Smart Stop Fix)")
+        self.get_logger().info("Robot Master Started (Z-Dist Stop & Auto Row Dist)")
 
     def vision_cb(self, msg):
         d = msg.data
+        # d = [Found, X_Err, Size, Yolo_Err, PlantDist(4), Gap, Interval, Z_Dist(7)]
+        
         self.tag_found = (d[0] == 1.0)
         self.tag_err = d[1]
         self.tag_size = d[2]
         self.yolo_lat_err = d[3] 
         
-        if self.tag_found:
-            self.last_tag_size = self.tag_size # จำค่าล่าสุดไว้
+        # 🔥 1. รับค่าระยะทางที่จะเดิน (จากป้าย ID)
+        # d[4] คือค่าที่ PC ถอดรหัสมา (เช่น 40.0)
+        if self.tag_found and len(d) > 4:
+            dist_from_tag = d[4] 
+            # อัพเดทเฉพาะตอนค้นหา เพื่อไม่ให้ค่าโดดไปมาตอนเข้าใกล้
+            if self.state == STATE_SEARCH and dist_from_tag > 0:
+                self.target_m = dist_from_tag / 100.0 # แปลง cm -> m (0.4m)
 
-        if self.state <= STATE_APPROACH and d[4] > 0:
-            self.target_dist = d[4] / 100.0 
+        # 🔥 2. รับค่า Z-Distance (ระยะห่างจริงจากป้าย)
+        # อยู่ที่ Index 7 (ตัวที่ 8)
+        if len(d) > 7:
+            self.current_z_dist = d[7]
 
     def encoder_cb(self, msg):
         curr = [msg.linear.x, msg.linear.y, msg.angular.x, msg.angular.y]
@@ -94,27 +105,25 @@ class RobotMaster(Node):
         # 1. SEARCH
         if self.state == STATE_SEARCH:
             if self.tag_found:
+                self.get_logger().info(f"Tag Found! Will walk: {self.target_m} m")
                 self.state = STATE_APPROACH
             else:
                 left_rpm, right_rpm = -30.0, 30.0
 
-        # 2. APPROACH
+        # 2. APPROACH (เข้าหาป้าย)
         elif self.state == STATE_APPROACH:
-            # เงื่อนไขหยุด 1: ป้ายใหญ่พอ
-            condition_1 = self.tag_size > self.stop_tag_size
+            # 🔥 เงื่อนไขหยุดใหม่: ใช้ระยะจริง (Z) น้อยกว่าที่ตั้งไว้ (เช่น 0.6m)
+            # ต้องมากกว่า 0 ด้วย (กันค่าขยะ)
+            stop_condition = (self.current_z_dist > 0.0) and (self.current_z_dist < self.stop_distance_threshold)
             
-            # 🔥 เงื่อนไขหยุด 2: ป้ายหาย แต่เมื่อกี้อยู่ใกล้มากแล้ว (Blind Stop)
-            condition_2 = (not self.tag_found) and (self.last_tag_size > 60)
-
-            if condition_1 or condition_2:
-                self.get_logger().info(f"Arrived! (Size: {self.tag_size} / Last: {self.last_tag_size})")
+            if self.tag_found and stop_condition:
+                self.get_logger().info(f"Arrived! Z-Dist: {self.current_z_dist:.2f} m")
                 self.pause_start_time = time.time()
                 self.state = STATE_PAUSE
                 self.send_rpm(0, 0)
                 return
             
             elif not self.tag_found:
-                # ถ้าไม่เจอและยังอยู่ไกล -> กลับไปหาใหม่
                 self.state = STATE_SEARCH
             
             else:
@@ -122,46 +131,42 @@ class RobotMaster(Node):
                 turn = self.tag_err * self.kp_tag
                 left_rpm = 60.0 - turn
                 right_rpm = 60.0 + turn
-                
-                # Debug ดูขนาดป้าย
-                print(f"Approaching... Size: {self.tag_size:.1f} / {self.stop_tag_size}", end='\r')
+                # Debug ดูระยะจริง
+                # print(f"Appr... Z: {self.current_z_dist:.2f}m / Target: {self.stop_distance_threshold}m", end='\r')
 
         # 3. PAUSE (หยุด 2 วิ)
         elif self.state == STATE_PAUSE:
             left_rpm, right_rpm = 0.0, 0.0
             if time.time() - self.pause_start_time > 2.0:
                 self.get_logger().info("Pause Done -> START TURNING")
-                
-                # 🔥 ต้องเพิ่มบรรทัดนี้! เพื่อเริ่มนับวินาทีที่ 0
                 self.turn_start_time = time.time() 
-                
                 self.state = STATE_TURNL
                 
+        # 4. TURN LEFT
         elif self.state == STATE_TURNL:
-            # คำนวณเวลาที่ผ่านไป
             elapsed = time.time() - self.turn_start_time
-            
-            # เช็คว่าครบ 5 วินาทีหรือยัง
-            if elapsed > 7.0:
-                self.get_logger().info("Turn Done -> Go YOLO")
+            if elapsed > 7.0: # หมุน 7 วิ
+                self.get_logger().info("Turn Done -> RESET DIST -> Go YOLO")
+                
+                # 🔥 สำคัญ: รีเซ็ตระยะทางเป็น 0 (เริ่มนับต้นแปลง)
                 self.total_dist = 0.0 
+                
                 self.state = STATE_GOTO_FIRST 
             else:
-                # 🔥 แก้สูตรหมุนซ้ายให้ง่ายและนิ่ง: ล้อซ้ายถอย ล้อขวาเดินหน้า
                 turn_speed_rpm = 30.0 
                 left_rpm = -turn_speed_rpm
                 right_rpm = turn_speed_rpm
-                
-                # Debug เวลาที่เหลือ
-                # print(f"Turning... {elapsed:.1f}/5.0 s", end='\r')
-                
 
-        # 4. GOTO FIRST
+        # 5. GOTO FIRST (เดินตามร่อง)
         elif self.state == STATE_GOTO_FIRST:
-            if abs(self.total_dist) >= self.target_dist:
-                self.get_logger().info("REACHED PLANT! Stopping.")
+            current_val = abs(self.total_dist)
+            
+            # 🔥 ใช้เป้าหมายที่อ่านได้จากป้าย (self.target_m)
+            if current_val >= self.target_m:
+                self.get_logger().info(f"REACHED TARGET ({current_val:.2f} / {self.target_m} m). STOP.")
                 self.state = STATE_WAIT
             else:
+                # YOLO Lane Keeping
                 turn = (self.yolo_lat_err * self.kp_row) * -1.0 
                 max_turn = self.walk_speed * 0.8 
                 if turn > max_turn: turn = max_turn
@@ -172,7 +177,7 @@ class RobotMaster(Node):
                 left_rpm = (v_l / (2*math.pi*self.wheel_radius)) * 60
                 right_rpm = (v_r / (2*math.pi*self.wheel_radius)) * 60
 
-        # 5. WAIT
+        # 6. WAIT
         elif self.state == STATE_WAIT:
             left_rpm, right_rpm = 0.0, 0.0
 
