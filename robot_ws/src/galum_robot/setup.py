@@ -55,7 +55,8 @@ setup(
             'comapril= galum_robot.com_apriltag:main',
             'complot= galum_robot.com_camera_plot:main',
             'testrun= galum_robot.test_turnin:main',
-            'pha_camera = galum_robot.pha_camera:main'
+            'runcamera = galum_robot.send_camera:main',
+            'runstate = galum_robot.pi5_state:main' ,
         ],
     },
 )
