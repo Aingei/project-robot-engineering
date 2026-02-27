@@ -85,10 +85,25 @@ class PCVisionCombined(Node):
             self.plant_gap = float(gap)
             self.plant_interval = float(interval)
 
+            # text = f"Dist:{p_dist} Z:{self.z_dist:.2f}m"
+            # cv2.putText(frame, text, (int(tag.center[0]), int(tag.center[1])), 
+            #             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            
+            # วาดกรอบสี่เหลี่ยมรอบ Tag
             cv2.polylines(frame, [tag.corners.astype(int)], True, (0, 255, 0), 2)
-            text = f"Dist:{p_dist} Z:{self.z_dist:.2f}m"
-            cv2.putText(frame, text, (int(tag.center[0]), int(tag.center[1])), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            
+            # 🔥 โชว์ข้อความแบบ "40115 -> 40 5 15"
+            # Format: "ID -> Dist Gap Interval"
+            debug_text = f"{tag.tag_id} = {p_dist},{gap},{interval}"
+            z_text = f"Z: {self.z_dist:.2f}m"
+            
+            # วาดบนจอ (เหนือกรอบ Tag)
+            cv2.putText(frame, debug_text, (int(tag.center[0]) - 80, int(tag.center[1]) - 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2) # สีเหลือง
+            
+            # วาดระยะ Z (ใต้กรอบ Tag)
+            cv2.putText(frame, z_text, (int(tag.center[0]) - 40, int(tag.center[1]) + 50), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2) # สีเขียวอ่อน
         
         self.tag_found = found
         self.img_april = frame
