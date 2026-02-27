@@ -16,19 +16,11 @@ class PCVisionCombined(Node):
 
         # --- Settings ---
         self.yolo_model = "rack02.pt" 
-        
-        # 🔥 เพิ่ม 1: ตั้งค่าขนาดป้ายจริง และ ค่ากล้อง
-        # สำคัญ! ต้องวัดขนาดสี่เหลี่ยมดำของป้ายจริง หน่วยเป็นเมตร (เช่น 4cm = 0.04)
         self.TAG_REAL_SIZE = 0.07  
-        
-        # ค่ากล้อง [fx, fy, cx, cy] (ประมาณการสำหรับภาพ 640x480)
-        # ถ้าใช้ภาพเล็ก 320x240 ให้หารเลขพวกนี้ครึ่งนึง (เช่น [300, 300, 160, 120])
         self.camera_params = [600, 600, 320, 240] 
 
-        # 1. รับภาพ AprilTag
+        # Subscriptions
         self.create_subscription(CompressedImage, '/camera/stream', self.process_april, qos_profile=qos.qos_profile_sensor_data)
-        
-        # 2. รับภาพ YOLO
         self.create_subscription(CompressedImage, '/camera/stream/plot', self.process_yolo, qos_profile=qos.qos_profile_sensor_data)
         
         # Publisher
@@ -48,15 +40,16 @@ class PCVisionCombined(Node):
         self.plant_gap = 0.0
         self.plant_interval = 0.0
         self.yolo_lat_error = 0.0   
+        self.z_dist = 0.0
         
-        # ตัวแปรเก็บภาพ
+        # 🔥 เพิ่ม: ตัวแปรเช็คว่าเจอแปลงไหม (0=ไม่เจอ, 1=เจอ)
+        self.yolo_found = 0.0
+
+        # Image buffers
         self.img_april = None
         self.img_yolo = None
-        
-        # 🔥 เพิ่ม 2: ตัวแปรเก็บระยะทางจริง (แกน Z)
-        self.z_dist = 0.0
 
-        self.get_logger().info("PC Vision Combined Started (3D Pose Mode)")
+        self.get_logger().info("PC Vision Combined Started (Wait-For-Scan Mode)")
 
     def decode_cabbage_data(self, tag_id):
         s = str(tag_id).zfill(5)
@@ -74,7 +67,6 @@ class PCVisionCombined(Node):
         center_x = frame.shape[1] // 2
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        # 🔥 แก้ 3: ใส่ parameter เพื่อคำนวณระยะ 3D
         detections = self.at_detector.detect(gray, 
                                              estimate_tag_pose=True, 
                                              camera_params=self.camera_params, 
@@ -86,8 +78,6 @@ class PCVisionCombined(Node):
             found = 1.0
             self.tag_error = float(center_x - int(tag.center[0]))
             self.tag_size = float(abs(tag.corners[1][0] - tag.corners[0][0]))
-            
-            # 🔥 แก้ 4: ดึงค่าระยะแกน Z (ความลึก)
             self.z_dist = float(tag.pose_t[2][0]) 
             
             p_dist, gap, interval = self.decode_cabbage_data(tag.tag_id)
@@ -96,15 +86,11 @@ class PCVisionCombined(Node):
             self.plant_interval = float(interval)
 
             cv2.polylines(frame, [tag.corners.astype(int)], True, (0, 255, 0), 2)
-            
-            # แสดงค่าบนจอ
-            text = f"Dist:{p_dist} Z-Range:{self.z_dist:.2f}m"
+            text = f"Dist:{p_dist} Z:{self.z_dist:.2f}m"
             cv2.putText(frame, text, (int(tag.center[0]), int(tag.center[1])), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         
         self.tag_found = found
-        # cv2.imshow("Cam 1: AprilTag", frame)
-        # cv2.waitKey(1)
         self.img_april = frame
 
     def process_yolo(self, msg):
@@ -115,11 +101,11 @@ class PCVisionCombined(Node):
         height, width = frame.shape[:2]
         cam_cx = width // 2
         
-        # รัน YOLO (device=0 คือ GPU)
         results = self.model.track(frame, persist=True, device=0, imgsz=320, verbose=False)
         annotated_frame = results[0].plot()
         
         lat_err = 0.0
+        found = 0.0 # 🔥 เริ่มต้นเป็น 0 (ไม่เจอ)
 
         if results[0].boxes:
             closest_box = None
@@ -134,20 +120,17 @@ class PCVisionCombined(Node):
             if closest_box:
                 cx, cy, w, h = closest_box.xywh[0].tolist()
                 lat_err = cx - cam_cx 
+                found = 1.0 # 🔥 เจอแปลงแล้ว!
                 
                 cv2.line(annotated_frame, (0, int(cy)), (width, int(cy)), (0, 255, 0), 2)
                 cv2.circle(annotated_frame, (cam_cx, int(cy)), 5, (0,0,255), -1)
-                cv2.putText(annotated_frame, f"Lat Err: {int(lat_err)}", (20, 50), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
         self.yolo_lat_error = float(lat_err)
+        self.yolo_found = float(found) # 🔥 อัพเดทตัวแปร
         
-        # cv2.imshow("Cam 2: YOLO", annotated_frame)
-        # cv2.waitKey(1)
         self.img_yolo = annotated_frame
     
-    #size on window
-    def resize_for_stack(self, img, target_h=640):
+    def resize_for_stack(self, img, target_h=480):
         h, w = img.shape[:2]
         ratio = target_h / float(h)
         target_w = int(w * ratio)
@@ -155,7 +138,6 @@ class PCVisionCombined(Node):
 
     def send_packet(self):
         msg_out = Float32MultiArray()
-        # 🔥 แก้ 5: เพิ่ม self.z_dist เป็นตัวสุดท้าย
         msg_out.data = [
             float(self.tag_found),
             float(self.tag_error),
@@ -164,23 +146,18 @@ class PCVisionCombined(Node):
             float(self.plant_dist),
             float(self.plant_gap),
             float(self.plant_interval),
-            float(self.z_dist) # <--- ตัวที่ 8 (index 7)
+            float(self.z_dist),
+            float(self.yolo_found)  # 🔥 เพิ่มตัวที่ 9 (Index 8): บอกหุ่นว่าเจอแปลงไหม
         ]
         self.data_pub.publish(msg_out)
         
+        # Display Combined View
         if (self.img_april is not None) and (self.img_yolo is not None):
-            # 1. ปรับขนาดให้สูงเท่ากัน (เช่น 360px)
-            v1 = self.resize_for_stack(self.img_april, 640)
-            v2 = self.resize_for_stack(self.img_yolo, 640)
-            
-            # 2. รวมภาพแนวนอน
+            v1 = self.resize_for_stack(self.img_april, 480)
+            v2 = self.resize_for_stack(self.img_yolo, 480)
             combined = np.hstack((v1, v2))
-            
-            # 3. โชว์
             cv2.imshow("Galum Robot Vision", combined)
             cv2.waitKey(1)
-        
-        # กรณีภาพมาแค่อันเดียว (กัน Error)
         elif self.img_april is not None:
              cv2.imshow("Galum Robot Vision", self.img_april)
              cv2.waitKey(1)
