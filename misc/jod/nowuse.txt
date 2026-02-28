@@ -1,0 +1,4 @@
+send_camera.py
+pi5_state_segm.py
+com_segmrun.py
+ros2 launch galum_robot bringup.launch.py
