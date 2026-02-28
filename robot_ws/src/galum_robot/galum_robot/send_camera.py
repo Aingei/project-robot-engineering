@@ -114,7 +114,7 @@ class PiCameraSender(Node):
     def verify_camera(self, index):
         """Helper to quickly check if a camera index works"""
         cap = cv2.VideoCapture(index)
-        if cap.isOpened():
+        if cap.isOpened():  
             ret, _ = cap.read()
             cap.release()
             return ret
