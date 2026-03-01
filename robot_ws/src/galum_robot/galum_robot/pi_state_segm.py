@@ -16,7 +16,8 @@ STATE_PAUSE               = 15
 STATE_TURNL               = 3
 STATE_FORWARD_AFTER_TURN  = 5
 STATE_ALIGN_ROW           = 4
-STATE_PAUSE_AFTER_ALIGN   = 7   # <--- [NEW] หยุดหลังจากขนานแล้ว
+STATE_PAUSE_AFTER_ALIGN   = 7
+STATE_BACK_TO_TAG         = 6   # [NEW] ถอยหลังจนเจอ tag ขอบบน
 STATE_GOTO_FIRST          = 2
 STATE_WAIT                = 99
 
@@ -26,6 +27,7 @@ STATE_NAMES = {
     STATE_FORWARD_AFTER_TURN: "FWD_AFTER_TURN",
     STATE_ALIGN_ROW: "ALIGN_ROW",
     STATE_PAUSE_AFTER_ALIGN: "PAUSE_AFTER_ALIGN",
+    STATE_BACK_TO_TAG: "BACK_TO_TAG",
     STATE_GOTO_FIRST: "GOTO_FIRST",
     STATE_WAIT: "WAIT"
 }
@@ -39,25 +41,29 @@ class RobotMaster(Node):
         self.wheel_radius   = 0.05
         self.ticks_per_rev  = 7436
         self.m_per_tick     = (2 * math.pi * self.wheel_radius) / self.ticks_per_rev
-        self.walk_speed     = 0.4           # m/s forward
+        self.walk_speed     = 0.4
 
         # ── Thresholds ──────────────────────────────────────────
-        self.stop_distance_threshold = 0.5  # meters (AprilTag Z)
-        self.align_lat_tol           = 30.0  # px  error tolerance
-        self.align_ang_tol           = 8.0   # deg error tolerance
-        self.align_min_dist          = 0.20  # m  must travel before checking align
+        self.stop_distance_threshold = 0.5
+        self.align_lat_tol           = 80.0 #30
+        self.align_ang_tol           = 999.0 #8
+        self.align_min_dist          = 0.20
 
         # ── PID Gains ───────────────────────────────────────────
-        self.kp_tag  = 0.45    # AprilTag centering
-        self.kp_lat  = 0.003   # lane lateral error (px → m/s) คุมให้รถอยู่ขนานแปลง
-        self.kp_head = 0.015    # lane heading error (deg → m/s) คุมให้ไม่หักมากเกินไป
+        self.kp_tag  = 0.45
+        self.kp_lat  = 0.003
+        self.kp_head = 0.0
 
         # ── Target offset ───────────────────────────────────────
-        self.target_offset = -80   # px, positive = rack should be to the right
+        self.target_offset = -20
+
+        # [NEW] Back scan threshold
+        # tag_y_ratio < ค่านี้ = tag อยู่ขอบบนแล้ว → หยุดถอย
+        self.back_tag_y_threshold = 0.25  # บน 25% ของภาพ
 
         # ── State variables ─────────────────────────────────────
-        self.state              = STATE_SEARCH
-        self.target_m           = 0.5
+        self.state    = STATE_SEARCH
+        self.target_m = 0.5
 
         # Vision data
         self.tag_found      = False
@@ -68,19 +74,27 @@ class RobotMaster(Node):
         self.lane_x         = 0.0
         self.lane_angle     = 0.0
 
+        # [NEW] Back scan data
+        self.back_tag_found   = False
+        self.back_tag_y_ratio = 1.0
+
         # Encoder
-        self.total_dist   = 0.0
-        self.prev_ticks   = [0, 0, 0, 0]
-        self.first_run    = True
+        self.total_dist = 0.0
+        self.prev_ticks = [0, 0, 0, 0]
+        self.first_run  = True
 
         # Timers
         self.pause_start_time       = 0.0
         self.turn_start_time        = 0.0
         self.forward_start_time     = 0.0
-        self.pause_align_start_time = 0.0 # <--- [NEW] Timer สำหรับหยุดหลัง Align
+        self.pause_align_start_time = 0.0
 
         # ── ROS I/O ─────────────────────────────────────────────
         self.cmd_pub = self.create_publisher(Twist, "/galum/cmd_move/rpm", 10)
+
+        # [NEW] publisher สำหรับ scan_mode → บอก vision node
+        self.scan_mode_pub = self.create_publisher(Float32, "/galum/scan_mode", 10)
+
         self.create_subscription(Float32MultiArray, "/galum/vision_packet",
                                  self.vision_cb, qos.qos_profile_sensor_data)
         self.create_subscription(Twist, "/galum/encoder",
@@ -110,9 +124,13 @@ class RobotMaster(Node):
                     f"target_m set: {self.target_m:.3f}m (raw d[4]={raw_val})",
                     throttle_duration_sec=1.0)
 
-        self.current_z_dist = d[7] if len(d) > 7 else 0.0
-        self.yolo_found     = (d[8] == 1.0) if len(d) > 8 else True
-        self.lane_angle     = d[9] if len(d) > 9 else 0.0
+        self.current_z_dist = d[7]  if len(d) > 7  else 0.0
+        self.yolo_found     = (d[8] == 1.0) if len(d) > 8  else True
+        self.lane_angle     = d[9]  if len(d) > 9  else 0.0
+
+        # [NEW] รับ back scan data index 12, 13
+        self.back_tag_found   = (d[12] == 1.0) if len(d) > 12 else False
+        self.back_tag_y_ratio = d[13]           if len(d) > 13 else 1.0
 
     def encoder_cb(self, msg):
         curr = [msg.linear.x, msg.linear.y, msg.angular.x, msg.angular.y]
@@ -139,14 +157,13 @@ class RobotMaster(Node):
         pid_out = (lat_error * self.kp_lat) + (head_error * self.kp_head)
         max_turn = self.walk_speed * 0.8
         pid_out  = max(-max_turn, min(max_turn, pid_out))
-    
-        self.get_logger().info(
-        f"PID | lane_x:{self.lane_x:+.0f} offset:{self.target_offset} "
-        f"lat_err:{lat_error:+.0f} pid:{pid_out:+.3f}",
-        throttle_duration_sec=0.3)
-        
-        return pid_out, lat_error
 
+        self.get_logger().info(
+            f"PID | lane_x:{self.lane_x:+.0f} offset:{self.target_offset} "
+            f"lat_err:{lat_error:+.0f} pid:{pid_out:+.3f}",
+            throttle_duration_sec=0.3)
+
+        return pid_out, lat_error
 
     def _lane_to_rpm(self, pid_out):
         v_l = self.walk_speed + pid_out
@@ -158,6 +175,16 @@ class RobotMaster(Node):
     def _fwd_rpm(self):
         r = (self.walk_speed / (2 * math.pi * self.wheel_radius)) * 60
         return r, r
+
+    def _back_rpm(self):
+        """ถอยหลังช้าๆ"""
+        r = (self.walk_speed * 0.5 / (2 * math.pi * self.wheel_radius)) * 60
+        return -r, -r  # ลบ = ถอยหลัง
+
+    def _set_scan_mode(self, mode: float):
+        msg = Float32()
+        msg.data = mode
+        self.scan_mode_pub.publish(msg)
 
     # ─────────────────────────────────────────────────────
     #  Main control loop (20 Hz)
@@ -174,7 +201,6 @@ class RobotMaster(Node):
                 self.get_logger().info("Tag found → APPROACH")
                 self.state = STATE_APPROACH
             else:
-                # left_rpm, right_rpm = -60.0, 60.0
                 left_rpm, right_rpm = self._fwd_rpm()
 
         # ── 2. APPROACH ───────────────────────────────────
@@ -206,15 +232,14 @@ class RobotMaster(Node):
         # ── 4. TURN LEFT ──────────────────────────────────
         elif self.state == STATE_TURNL:
             elapsed = time.monotonic() - self.turn_start_time
-            if elapsed < 4.0:
-                left_rpm, right_rpm = -60.0, 60.0
+            if elapsed < 7.0:
+                left_rpm, right_rpm = -40.0, 40.0
             else:
-                # เลี้ยวเสร็จ -> เดินหน้าหาแปลงเลย (FWD)
                 self.get_logger().info("Turn done → FWD_AFTER_TURN")
                 self.forward_start_time = time.monotonic()
                 self.state = STATE_FORWARD_AFTER_TURN
 
-        # ── 5. FORWARD 4 s (เดินเข้าหาแปลง) ────────────────
+        # ── 5. FORWARD (เดินเข้าหาแปลง) ────────────────────
         elif self.state == STATE_FORWARD_AFTER_TURN:
             elapsed = time.monotonic() - self.forward_start_time
             if elapsed < 2.0:
@@ -228,7 +253,7 @@ class RobotMaster(Node):
                     self.get_logger().info("Fwd done, no row → scanning")
                     left_rpm, right_rpm = -10.0, 10.0
 
-        # ── 6. ALIGN ROW (จัดให้ขนาน) ─────────────────────
+        # ── 6. ALIGN ROW ──────────────────────────────────
         elif self.state == STATE_ALIGN_ROW:
             if not self.yolo_found:
                 left_rpm = right_rpm = 0.0
@@ -245,22 +270,42 @@ class RobotMaster(Node):
                 if (abs(self.total_dist) >= self.align_min_dist and
                         abs(lat_error) < self.align_lat_tol and
                         abs(self.lane_angle) < self.align_ang_tol):
-                    
-                    # [NEW] ขนานแล้ว -> หยุดก่อน (PAUSE_AFTER_ALIGN)
                     self.get_logger().info("Aligned! → PAUSE_AFTER_ALIGN")
                     self.pause_align_start_time = time.monotonic()
                     self.state = STATE_PAUSE_AFTER_ALIGN
 
-        # ── [NEW] 7. PAUSE AFTER ALIGN (หยุดนิ่งหลังขนาน) ──
+        # ── 7. PAUSE AFTER ALIGN ──────────────────────────
         elif self.state == STATE_PAUSE_AFTER_ALIGN:
             left_rpm, right_rpm = 0.0, 0.0
-            # หยุดรอ 2 วินาที
             if time.monotonic() - self.pause_align_start_time > 2.0:
-                self.get_logger().info("Ready to go → GOTO_FIRST")
+                # [NEW] เปิด scan mode แล้วไป BACK_TO_TAG
+                self.get_logger().info("Aligned! → BACK_TO_TAG (scan mode ON)")
+                self._set_scan_mode(1.0)
+                self.state = STATE_BACK_TO_TAG
+
+        # ── [NEW] 8. BACK TO TAG ───────────────────────────
+        elif self.state == STATE_BACK_TO_TAG:
+            # ถ้าเจอ tag แล้วและอยู่ขอบบน → หยุดถอย ไป GOTO_FIRST
+            tag_at_top = (self.back_tag_found and
+                          self.back_tag_y_ratio < self.back_tag_y_threshold)
+
+            if tag_at_top:
+                self.get_logger().info(
+                    f"Tag at top (y_ratio:{self.back_tag_y_ratio:.2f}) → GOTO_FIRST")
+                self.send_rpm(0, 0)
+                self._set_scan_mode(0.0)  # ปิด scan mode กลับเป็น YOLO
                 self.total_dist = 0.0
                 self.state = STATE_GOTO_FIRST
+            else:
+                # ถอยหลังช้าๆ
+                left_rpm, right_rpm = self._back_rpm()
+                self.get_logger().info(
+                    f"BACK | tag_found:{self.back_tag_found} "
+                    f"y_ratio:{self.back_tag_y_ratio:.2f} "
+                    f"threshold:{self.back_tag_y_threshold}",
+                    throttle_duration_sec=0.5)
 
-        # ── 8. GOTO FIRST ─────────────────────────────────
+        # ── 9. GOTO FIRST ─────────────────────────────────
         elif self.state == STATE_GOTO_FIRST:
             self.get_logger().info(
                 f"GOTO | dist:{self.total_dist:.3f}m / {self._target_dist():.3f}m",
@@ -276,7 +321,7 @@ class RobotMaster(Node):
                     pid_out = 0.0
                 left_rpm, right_rpm = self._lane_to_rpm(pid_out)
 
-        # ── 9. WAIT ───────────────────────────────────────
+        # ── 10. WAIT ──────────────────────────────────────
         elif self.state == STATE_WAIT:
             left_rpm = right_rpm = 0.0
 

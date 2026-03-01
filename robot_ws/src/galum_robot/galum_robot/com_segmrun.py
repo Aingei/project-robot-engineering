@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 pc_vision_combined.py
-(Fixed: ZeroDivisionError + fitLine flattening + Debug Text + Auto CAMERA_PARAMS + Lost Counter)
+(Fixed: ZeroDivisionError + fitLine flattening + Debug Text + Auto CAMERA_PARAMS + Scan Mode)
 """
 
 import cv2
@@ -11,7 +11,7 @@ import pupil_apriltags
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import CompressedImage
-from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32MultiArray, Float32
 from ultralytics import YOLO
 from rclpy import qos
 
@@ -59,6 +59,12 @@ class PCVisionCombined(Node):
         sub_qos = qos.qos_profile_sensor_data
         self.create_subscription(CompressedImage, '/camera/stream',      self.cb_april, sub_qos)
         self.create_subscription(CompressedImage, '/camera/stream/plot', self.cb_yolo,  sub_qos)
+
+        # [NEW] รับ scan_mode จาก robot_master
+        # 0.0 = YOLO mode ปกติ
+        # 1.0 = Scan AprilTag บนกล้อง YOLO (ตอนถอยหลัง)
+        self.create_subscription(Float32, '/galum/scan_mode', self.cb_scan_mode, sub_qos)
+
         self.data_pub = self.create_publisher(Float32MultiArray, '/galum/vision_packet', sub_qos)
         self.create_timer(0.05, self.send_packet)
 
@@ -68,20 +74,25 @@ class PCVisionCombined(Node):
         self.yolo_found=0.0; self.lane_center_x=0.0; self.heading_angle=0.0
         self.detect_mode=0.0; self.kalman_valid=0.0
         self.img_april=None; self.img_yolo=None
-        
-        # [FIX] เพิ่มบรรทัดนี้ครับ เพื่อแก้ AttributeError
-        self.lost_counter = 0
 
-    # ── APRILTAG ────────────────────────────────────────────
+        # [NEW] scan mode vars
+        self.scan_mode      = 0.0   # 0=YOLO, 1=AprilTag บนกล้อง YOLO
+        self.back_tag_found = 0.0   # เจอ tag บนกล้อง YOLO ไหม
+        self.back_tag_y_ratio = 1.0 # สัดส่วน y ของ tag (0=บนสุด, 1=ล่างสุด)
+
+    # ── SCAN MODE CALLBACK ──────────────────────────────────
+    def cb_scan_mode(self, msg):
+        self.scan_mode = msg.data
+
+    # ── APRILTAG (กล้องหน้า) ────────────────────────────────
     def cb_april(self, msg):
         frame = self._decode(msg)
         if frame is None: return
         fh, fw = frame.shape[:2]
         cx_img = fw // 2
 
-        # ── Auto CAMERA_PARAMS จาก resolution จริง ──────────
+        # Auto CAMERA_PARAMS จาก resolution จริง
         self.CAMERA_PARAMS = [600, 600, fw // 2, fh // 2]
-        # ────────────────────────────────────────────────────
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         detections = self.at_detector.detect(
@@ -98,11 +109,9 @@ class PCVisionCombined(Node):
             p, g, iv = self._decode_tag(tag.tag_id)
             self.plant_dist, self.plant_gap, self.plant_interval = float(p), float(g), float(iv)
 
-            # วาดกรอบ
             pts = tag.corners.astype(int)
             cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
 
-            # Debug text: tag_id และ Z
             debug_text = f"{tag.tag_id} = {p},{g},{iv}"
             z_text     = f"Z: {self.z_dist:.2f}m"
             tx, ty = int(tag.center[0]), int(tag.center[1])
@@ -113,7 +122,6 @@ class PCVisionCombined(Node):
         else:
             self.tag_found = 0.0
 
-        # แสดง resolution จริงมุมล่างซ้าย
         cv2.putText(frame, f"{fw}x{fh} cx:{fw//2} cy:{fh//2}",
                     (5, fh - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 0), 1)
 
@@ -125,12 +133,17 @@ class PCVisionCombined(Node):
         gap = {'1':5,'2':10,'3':15,'4':20,'5':25}.get(s[2], 0)
         return int(s[0:2]), gap, int(s[3:5])
 
-    # ── YOLO (Safe Math) ────────────────────────────────────
+    # ── YOLO + BACK SCAN ────────────────────────────────────
     def cb_yolo(self, msg):
         frame = self._decode(msg)
         if frame is None: return
         h, w = frame.shape[:2]
         cam_cx = w // 2
+
+        # [NEW] ถ้า scan_mode == 1 → ทำ AprilTag detection แทน YOLO
+        if self.scan_mode == 1.0:
+            self._cb_back_scan(frame, h, w)
+            return
 
         results = self.model.track(frame, persist=True, device=0, imgsz=320, verbose=False)
 
@@ -149,7 +162,6 @@ class PCVisionCombined(Node):
             if contours:
                 c = max(contours, key=cv2.contourArea)
 
-                # 1. Centroid
                 M = cv2.moments(c)
                 if M["m00"] > 0:
                     raw_cx = int(M["m10"] / M["m00"])
@@ -158,12 +170,10 @@ class PCVisionCombined(Node):
                     rect = cv2.minAreaRect(c)
                     raw_cx, raw_cy = int(rect[0][0]), int(rect[0][1])
 
-                # 2. fitLine
                 line = cv2.fitLine(c, cv2.DIST_L2, 0, 0.01, 0.01)
                 vx, vy, x0, y0 = line.flatten()
                 vx, vy, x0, y0 = float(vx), float(vy), float(x0), float(y0)
 
-                # 3. Calculate Target - bottom-half centroid แทน extrapolate
                 look_ahead_y = int(h * self.LOOK_AHEAD_RATIO)
                 bottom_mask = mask[h//2:, :]
                 bottom_contours, _ = cv2.findContours(
@@ -184,19 +194,14 @@ class PCVisionCombined(Node):
                     else:
                         target_cx = float(x0)
 
-                # [SAFEGUARD] Clamp ก่อนเข้า Kalman
-                target_cx = max(-w, min(2*w, target_cx))
-                
                 kx, ky = self.kalman.update(target_cx, look_ahead_y)
                 target_cx = float(kx)
 
-                # 4. Angle (normalize เป็น deviation from vertical)
                 raw_angle = math.degrees(math.atan2(vy, vx))
                 if abs(raw_angle) > 90:
                     raw_angle = raw_angle - math.copysign(180, raw_angle)
                 angle_deg = raw_angle
 
-                # 5. Draw Infinite Line
                 if abs(vy) > 1e-4:
                     x_top = int(x0 + (0 - y0) * (vx / vy))
                     x_bot = int(x0 + (h - y0) * (vx / vy))
@@ -221,30 +226,15 @@ class PCVisionCombined(Node):
             found = True
             mode = 1.0
 
-        # --- LOGIC for RESET / PREDICT ---
-        if found:
-            self.lost_counter = 0
-            # Safety Check: ถ้า Kalman หลุดโลก ให้รีเซ็ต
-            if abs(target_cx) > w * 2: 
-                self.kalman = KalmanTracker()
-                target_cx = float(cam_cx)
-        else:
-            self.lost_counter += 1
-            if self.lost_counter > 10:
-                # ถ้าไม่เจอเกิน 10 เฟรม -> รีเซ็ตทิ้ง
-                self.kalman = KalmanTracker()
-                self.kalman.initialized = False
-                target_cx = float(cam_cx)
-            elif self.kalman.initialized:
-                # ถ้ายังไม่เกิน 10 เฟรม -> เดาต่อ
-                px, py = self.kalman.predict_only()
-                if px is not None:
-                    target_cx = float(px)
-                    cv2.circle(frame, (px, py), 6, (255, 0, 255), -1)
+        # --- PREDICT ---
+        if not found and self.kalman.initialized:
+            px, py = self.kalman.predict_only()
+            if px is not None:
+                target_cx = float(px)
+                cv2.circle(frame, (px, py), 6, (255, 0, 255), -1)
 
-        # คำนวณ Error สุดท้าย
         cx_error = float(target_cx) - float(cam_cx)
-        
+
         self.yolo_found    = 1.0 if found else 0.0
         self.lane_center_x = cx_error
         self.heading_angle = angle_deg
@@ -253,6 +243,41 @@ class PCVisionCombined(Node):
 
         info = f"M:{int(mode)} Err:{cx_error:.0f} A:{angle_deg:.1f}"
         cv2.putText(frame, info, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        self.img_yolo = frame
+
+    # [NEW] ── BACK SCAN: AprilTag บนกล้อง YOLO ─────────────
+    def _cb_back_scan(self, frame, h, w):
+        """ใช้กล้อง YOLO detect AprilTag ตอนถอยหลัง"""
+        fh, fw = frame.shape[:2]
+        cam_params = [600, 600, fw // 2, fh // 2]
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        detections = self.at_detector.detect(
+            gray, estimate_tag_pose=True,
+            camera_params=cam_params,
+            tag_size=self.TAG_REAL_SIZE)
+
+        # วาด threshold line ขอบบน 20%
+        threshold_y = int(h * 0.2)
+        cv2.line(frame, (0, threshold_y), (w, threshold_y), (0, 255, 255), 1)
+        cv2.putText(frame, "BACK SCAN MODE", (10, 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+
+        if detections:
+            tag = max(detections, key=lambda d: d.decision_margin)
+            ty_center = float(tag.center[1])
+            self.back_tag_found   = 1.0
+            self.back_tag_y_ratio = ty_center / float(h)  # 0=บนสุด 1=ล่างสุด
+
+            pts = tag.corners.astype(int)
+            cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
+            cv2.putText(frame, f"Y_ratio:{self.back_tag_y_ratio:.2f}",
+                        (int(tag.center[0]) - 40, int(tag.center[1]) - 15),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+        else:
+            self.back_tag_found   = 0.0
+            self.back_tag_y_ratio = 1.0  # ยังไม่เจอ = ให้ถอยต่อ
+
         self.img_yolo = frame
 
     # ── UTILS ───────────────────────────────────────────────
@@ -279,10 +304,20 @@ class PCVisionCombined(Node):
     def send_packet(self):
         msg = Float32MultiArray()
         msg.data = [
-            float(self.tag_found), float(self.tag_error), float(self.tag_size),
-            float(self.lane_center_x), float(self.plant_dist), float(self.plant_gap),
-            float(self.plant_interval), float(self.z_dist), float(self.yolo_found),
-            float(self.heading_angle), float(self.detect_mode), float(self.kalman_valid)
+            float(self.tag_found),        # [0]
+            float(self.tag_error),        # [1]
+            float(self.tag_size),         # [2]
+            float(self.lane_center_x),    # [3]
+            float(self.plant_dist),       # [4]
+            float(self.plant_gap),        # [5]
+            float(self.plant_interval),   # [6]
+            float(self.z_dist),           # [7]
+            float(self.yolo_found),       # [8]
+            float(self.heading_angle),    # [9]
+            float(self.detect_mode),      # [10]
+            float(self.kalman_valid),     # [11]
+            float(self.back_tag_found),   # [12] [NEW] เจอ tag บนกล้อง YOLO ไหม
+            float(self.back_tag_y_ratio), # [13] [NEW] สัดส่วน y (0=บน, 1=ล่าง)
         ]
         self.data_pub.publish(msg)
 
