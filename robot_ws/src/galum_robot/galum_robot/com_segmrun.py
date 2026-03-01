@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 pc_vision_combined.py
-(Fixed: ZeroDivisionError + fitLine flattening)
+(Fixed: ZeroDivisionError + fitLine flattening + Debug Text + Auto CAMERA_PARAMS + Lost Counter)
 """
 
 import cv2
@@ -18,7 +18,6 @@ from rclpy import qos
 class KalmanTracker:
     def __init__(self, process_noise: float = 0.1, meas_noise: float = 0.1):
         self.kf = cv2.KalmanFilter(4, 2)
-        # State: [x, y, vx, vy]
         self.kf.transitionMatrix    = np.array([[1,0,1,0],[0,1,0,1],[0,0,1,0],[0,0,0,1]], np.float32)
         self.kf.measurementMatrix   = np.array([[1,0,0,0],[0,1,0,0]], np.float32)
         self.kf.processNoiseCov     = np.eye(4, dtype=np.float32) * process_noise
@@ -42,16 +41,16 @@ class KalmanTracker:
 class PCVisionCombined(Node):
     # ── TUNING ──────────────────────────────────────────────
     TAG_REAL_SIZE    = 0.07
-    CAMERA_PARAMS    = [600, 600, 320, 240]
+    CAMERA_PARAMS    = [600, 600, 160, 120]   # Auto-updated จาก frame จริง
     YOLO_MODEL       = "rack_segm.pt"
     MORPH_KERNEL     = 9
-    DISPLAY_H        = 480
-    LOOK_AHEAD_RATIO = 0.7 
+    DISPLAY_H        = 240
+    LOOK_AHEAD_RATIO = 0.7
     # ────────────────────────────────────────────────────────
 
     def __init__(self):
         super().__init__('pc_vision_combined')
-        
+
         self.at_detector = pupil_apriltags.Detector(families='tagStandard52h13')
         self.get_logger().info("Loading YOLO (Safe Draw)...")
         self.model = YOLO(self.YOLO_MODEL)
@@ -69,15 +68,27 @@ class PCVisionCombined(Node):
         self.yolo_found=0.0; self.lane_center_x=0.0; self.heading_angle=0.0
         self.detect_mode=0.0; self.kalman_valid=0.0
         self.img_april=None; self.img_yolo=None
+        
+        # [FIX] เพิ่มบรรทัดนี้ครับ เพื่อแก้ AttributeError
+        self.lost_counter = 0
 
     # ── APRILTAG ────────────────────────────────────────────
     def cb_april(self, msg):
         frame = self._decode(msg)
         if frame is None: return
-        cx_img = frame.shape[1] // 2
+        fh, fw = frame.shape[:2]
+        cx_img = fw // 2
+
+        # ── Auto CAMERA_PARAMS จาก resolution จริง ──────────
+        self.CAMERA_PARAMS = [600, 600, fw // 2, fh // 2]
+        # ────────────────────────────────────────────────────
+
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        detections = self.at_detector.detect(gray, estimate_tag_pose=True, camera_params=self.CAMERA_PARAMS, tag_size=self.TAG_REAL_SIZE)
-        
+        detections = self.at_detector.detect(
+            gray, estimate_tag_pose=True,
+            camera_params=self.CAMERA_PARAMS,
+            tag_size=self.TAG_REAL_SIZE)
+
         if detections:
             tag = max(detections, key=lambda d: d.decision_margin)
             self.tag_found = 1.0
@@ -86,15 +97,31 @@ class PCVisionCombined(Node):
             self.z_dist    = float(tag.pose_t[2][0])
             p, g, iv = self._decode_tag(tag.tag_id)
             self.plant_dist, self.plant_gap, self.plant_interval = float(p), float(g), float(iv)
+
+            # วาดกรอบ
             pts = tag.corners.astype(int)
-            cv2.polylines(frame, [pts], True, (0,255,0), 2)
+            cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
+
+            # Debug text: tag_id และ Z
+            debug_text = f"{tag.tag_id} = {p},{g},{iv}"
+            z_text     = f"Z: {self.z_dist:.2f}m"
+            tx, ty = int(tag.center[0]), int(tag.center[1])
+            cv2.putText(frame, debug_text, (tx - 60, ty - 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 1)
+            cv2.putText(frame, z_text,     (tx - 30, ty + 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 0), 1)
         else:
             self.tag_found = 0.0
+
+        # แสดง resolution จริงมุมล่างซ้าย
+        cv2.putText(frame, f"{fw}x{fh} cx:{fw//2} cy:{fh//2}",
+                    (5, fh - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 0), 1)
+
         self.img_april = frame
 
     def _decode_tag(self, tag_id):
         s = str(tag_id).zfill(5)
-        if len(s)!=5: return 0,0,0
+        if len(s) != 5: return 0, 0, 0
         gap = {'1':5,'2':10,'3':15,'4':20,'5':25}.get(s[2], 0)
         return int(s[0:2]), gap, int(s[3:5])
 
@@ -108,20 +135,20 @@ class PCVisionCombined(Node):
         results = self.model.track(frame, persist=True, device=0, imgsz=320, verbose=False)
 
         found = False
-        target_cx = float(cam_cx) 
+        target_cx = float(cam_cx)
         angle_deg = 0.0
         mode = 0.0
-        
-        cv2.line(frame, (cam_cx, 0), (cam_cx, h), (100,100,100), 1)
+
+        cv2.line(frame, (cam_cx, 0), (cam_cx, h), (100, 100, 100), 1)
 
         # --- SEGMENTATION ---
         if results[0].masks is not None:
             mask = self._build_clean_mask(results[0].masks.data.cpu().numpy(), h, w)
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
+
             if contours:
                 c = max(contours, key=cv2.contourArea)
-                
+
                 # 1. Centroid
                 M = cv2.moments(c)
                 if M["m00"] > 0:
@@ -131,36 +158,50 @@ class PCVisionCombined(Node):
                     rect = cv2.minAreaRect(c)
                     raw_cx, raw_cy = int(rect[0][0]), int(rect[0][1])
 
-                # 2. fitLine (Flatten first)
+                # 2. fitLine
                 line = cv2.fitLine(c, cv2.DIST_L2, 0, 0.01, 0.01)
                 vx, vy, x0, y0 = line.flatten()
                 vx, vy, x0, y0 = float(vx), float(vy), float(x0), float(y0)
 
-                # 3. Calculate Target (Prevent Divide by Zero)
+                # 3. Calculate Target - bottom-half centroid แทน extrapolate
                 look_ahead_y = int(h * self.LOOK_AHEAD_RATIO)
-                
-                # Safe division check
-                if abs(vy) > 1e-4:
-                    # x = x0 + (y - y0) * (vx / vy)
-                    calculated_target_x = x0 + (look_ahead_y - y0) * (vx / vy)
-                    target_cx = float(calculated_target_x)
-                else:
-                    target_cx = float(x0) # เส้นนอน เล็งที่จุดกลางเลย
+                bottom_mask = mask[h//2:, :]
+                bottom_contours, _ = cv2.findContours(
+                    bottom_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+                if bottom_contours:
+                    bc = max(bottom_contours, key=cv2.contourArea)
+                    bM = cv2.moments(bc)
+                    if bM["m00"] > 0:
+                        target_cx = float(bM["m10"] / bM["m00"])
+                        look_ahead_y = h//2 + int(bM["m01"] / bM["m00"])
+                    else:
+                        target_cx = float(np.clip(x0, 0, w))
+                else:
+                    if abs(vy) > 1e-4:
+                        calculated_target_x = x0 + (look_ahead_y - y0) * (vx / vy)
+                        target_cx = float(np.clip(calculated_target_x, 0, w))
+                    else:
+                        target_cx = float(x0)
+
+                # [SAFEGUARD] Clamp ก่อนเข้า Kalman
+                target_cx = max(-w, min(2*w, target_cx))
+                
                 kx, ky = self.kalman.update(target_cx, look_ahead_y)
                 target_cx = float(kx)
 
-                # 4. Angle
-                angle_deg = math.degrees(math.atan2(vy, vx))
+                # 4. Angle (normalize เป็น deviation from vertical)
+                raw_angle = math.degrees(math.atan2(vy, vx))
+                if abs(raw_angle) > 90:
+                    raw_angle = raw_angle - math.copysign(180, raw_angle)
+                angle_deg = raw_angle
 
-                # 5. Draw Infinite Line (Safe Logic)
+                # 5. Draw Infinite Line
                 if abs(vy) > 1e-4:
-                    # วาดจากบนสุด (y=0) ถึงล่างสุด (y=h)
                     x_top = int(x0 + (0 - y0) * (vx / vy))
                     x_bot = int(x0 + (h - y0) * (vx / vy))
                     cv2.line(frame, (x_top, 0), (x_bot, h), (255, 0, 0), 2)
                 else:
-                    # เส้นแนวนอน วาดซ้ายไปขวา
                     cv2.line(frame, (0, int(y0)), (w, int(y0)), (255, 0, 0), 2)
 
                 cv2.circle(frame, (int(target_cx), look_ahead_y), 8, (0, 255, 0), -1)
@@ -173,31 +214,45 @@ class PCVisionCombined(Node):
             bx, by, bw, bh = best_box.xywh[0].tolist()
             kx, ky = self.kalman.update(bx, by)
             target_cx = float(kx)
-            
+
             x1, y1, x2, y2 = best_box.xyxy[0].tolist()
-            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0,255,255), 2)
-            cv2.circle(frame, (int(kx), int(ky)), 8, (0,255,0), -1)
+            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 255), 2)
+            cv2.circle(frame, (int(kx), int(ky)), 8, (0, 255, 0), -1)
             found = True
             mode = 1.0
 
-        # --- PREDICT ---
-        if not found and self.kalman.initialized:
-            px, py = self.kalman.predict_only()
-            if px is not None:
-                target_cx = float(px)
-                cv2.circle(frame, (px, py), 6, (255,0,255), -1)
+        # --- LOGIC for RESET / PREDICT ---
+        if found:
+            self.lost_counter = 0
+            # Safety Check: ถ้า Kalman หลุดโลก ให้รีเซ็ต
+            if abs(target_cx) > w * 2: 
+                self.kalman = KalmanTracker()
+                target_cx = float(cam_cx)
+        else:
+            self.lost_counter += 1
+            if self.lost_counter > 10:
+                # ถ้าไม่เจอเกิน 10 เฟรม -> รีเซ็ตทิ้ง
+                self.kalman = KalmanTracker()
+                self.kalman.initialized = False
+                target_cx = float(cam_cx)
+            elif self.kalman.initialized:
+                # ถ้ายังไม่เกิน 10 เฟรม -> เดาต่อ
+                px, py = self.kalman.predict_only()
+                if px is not None:
+                    target_cx = float(px)
+                    cv2.circle(frame, (px, py), 6, (255, 0, 255), -1)
 
-        # Output Calc (Target - Cam เพื่อดึงเข้ากลาง)
+        # คำนวณ Error สุดท้าย
         cx_error = float(target_cx) - float(cam_cx)
-
-        self.yolo_found = 1.0 if found else 0.0
+        
+        self.yolo_found    = 1.0 if found else 0.0
         self.lane_center_x = cx_error
         self.heading_angle = angle_deg
-        self.detect_mode = mode
-        self.kalman_valid = 1.0 if self.kalman.initialized else 0.0
+        self.detect_mode   = mode
+        self.kalman_valid  = 1.0 if self.kalman.initialized else 0.0
 
         info = f"M:{int(mode)} Err:{cx_error:.0f} A:{angle_deg:.1f}"
-        cv2.putText(frame, info, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        cv2.putText(frame, info, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         self.img_yolo = frame
 
     # ── UTILS ───────────────────────────────────────────────
@@ -216,7 +271,7 @@ class PCVisionCombined(Node):
         combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, k)
         return cv2.morphologyEx(combined, cv2.MORPH_OPEN, k)
 
-    def _resize_h(self, img, target_h=480):
+    def _resize_h(self, img, target_h=240):
         if img is None: return None
         h, w = img.shape[:2]
         return cv2.resize(img, (int(w * target_h / h), target_h))
@@ -230,12 +285,12 @@ class PCVisionCombined(Node):
             float(self.heading_angle), float(self.detect_mode), float(self.kalman_valid)
         ]
         self.data_pub.publish(msg)
-        
+
         if self.img_april is not None and self.img_yolo is not None:
             v1 = self._resize_h(self.img_april, self.DISPLAY_H)
             v2 = self._resize_h(self.img_yolo, self.DISPLAY_H)
             if v1 is not None and v2 is not None:
-                cv2.imshow("Galum Vision (Safe)", np.hstack((v1, v2)))
+                cv2.imshow("Galum Vision", np.hstack((v1, v2)))
                 cv2.waitKey(1)
 
 def main(args=None):

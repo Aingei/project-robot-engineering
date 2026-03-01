@@ -42,18 +42,18 @@ class RobotMaster(Node):
         self.walk_speed     = 0.4           # m/s forward
 
         # ── Thresholds ──────────────────────────────────────────
-        self.stop_distance_threshold = 0.20  # meters (AprilTag Z)
+        self.stop_distance_threshold = 0.5  # meters (AprilTag Z)
         self.align_lat_tol           = 30.0  # px  error tolerance
         self.align_ang_tol           = 8.0   # deg error tolerance
         self.align_min_dist          = 0.20  # m  must travel before checking align
 
         # ── PID Gains ───────────────────────────────────────────
         self.kp_tag  = 0.45    # AprilTag centering
-        self.kp_lat  = 0.003   # lane lateral error (px → m/s)
-        self.kp_head = 0.02    # lane heading error (deg → m/s)
+        self.kp_lat  = 0.003   # lane lateral error (px → m/s) คุมให้รถอยู่ขนานแปลง
+        self.kp_head = 0.015    # lane heading error (deg → m/s) คุมให้ไม่หักมากเกินไป
 
         # ── Target offset ───────────────────────────────────────
-        self.target_offset = 0   # px, positive = rack should be to the right
+        self.target_offset = -80   # px, positive = rack should be to the right
 
         # ── State variables ─────────────────────────────────────
         self.state              = STATE_SEARCH
@@ -139,7 +139,14 @@ class RobotMaster(Node):
         pid_out = (lat_error * self.kp_lat) + (head_error * self.kp_head)
         max_turn = self.walk_speed * 0.8
         pid_out  = max(-max_turn, min(max_turn, pid_out))
+    
+        self.get_logger().info(
+        f"PID | lane_x:{self.lane_x:+.0f} offset:{self.target_offset} "
+        f"lat_err:{lat_error:+.0f} pid:{pid_out:+.3f}",
+        throttle_duration_sec=0.3)
+        
         return pid_out, lat_error
+
 
     def _lane_to_rpm(self, pid_out):
         v_l = self.walk_speed + pid_out
@@ -167,7 +174,8 @@ class RobotMaster(Node):
                 self.get_logger().info("Tag found → APPROACH")
                 self.state = STATE_APPROACH
             else:
-                left_rpm, right_rpm = -30.0, 30.0
+                # left_rpm, right_rpm = -60.0, 60.0
+                left_rpm, right_rpm = self._fwd_rpm()
 
         # ── 2. APPROACH ───────────────────────────────────
         elif self.state == STATE_APPROACH:
@@ -209,7 +217,7 @@ class RobotMaster(Node):
         # ── 5. FORWARD 4 s (เดินเข้าหาแปลง) ────────────────
         elif self.state == STATE_FORWARD_AFTER_TURN:
             elapsed = time.monotonic() - self.forward_start_time
-            if elapsed < 3.0:
+            if elapsed < 2.0:
                 left_rpm, right_rpm = self._fwd_rpm()
             else:
                 if self.yolo_found:
