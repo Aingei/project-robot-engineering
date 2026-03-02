@@ -42,7 +42,7 @@ class PCVisionCombined(Node):
     # ── TUNING ──────────────────────────────────────────────
     TAG_REAL_SIZE    = 0.07
     CAMERA_PARAMS    = [600, 600, 160, 120]   # Auto-updated จาก frame จริง
-    YOLO_MODEL       = "rack_segm.pt"
+    YOLO_MODEL       = "rack_segm02.pt"
     MORPH_KERNEL     = 9
     DISPLAY_H        = 240
     LOOK_AHEAD_RATIO = 0.7
