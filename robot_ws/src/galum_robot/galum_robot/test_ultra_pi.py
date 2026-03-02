@@ -261,26 +261,46 @@ class RobotMaster(Node):
                     self.get_logger().info("Scanning for wall...")
                     left_rpm, right_rpm = -10.0, 10.0 # หมุนหาเบาๆ
 
-        # ── 6. ALIGN WALL (Dual Ultrasonic) ──
+        # ── 6. ALIGN WALL (Modified for Steep Angle) ──
         elif self.state == STATE_ALIGN_WALL:
-            # คำนวณ PID จาก 2 เซนเซอร์
-            pid_out, avg_dist = self._calculate_dual_pid()
-            left_rpm, right_rpm = self._pid_to_rpm(pid_out)
-
-            self.get_logger().info(f"ALIGN | Dist:{avg_dist:.2f}m | Front:{self.us_front:.2f} Rear:{self.us_rear:.2f} | PID:{pid_out:.2f}", throttle_duration_sec=0.5)
-
-            # เช็คเงื่อนไขจบ:
-            # 1. ขนาน (หน้า-หลัง ต่างกันน้อยกว่า 3cm)
-            # 2. ระยะห่างได้ (Error น้อยกว่า 5cm)
-            is_parallel = abs(self.us_front - self.us_rear) < 0.03 
-            is_dist_ok  = abs(avg_dist - self.US_TARGET_DIST) < 0.05 
+            # 1. เช็คความต่างของระยะ (หน้า vs หลัง)
+            diff = self.us_front - self.us_rear
             
-            # ต้องเดินหน้ามาสักระยะ (min_dist) ถึงจะยอมให้จบ เพื่อความชัวร์
-            if abs(self.total_dist) >= 0.20 and is_parallel and is_dist_ok:
-                self.get_logger().info("Aligned OK -> PREPARE BACK SCAN")
-                self.pause_align_start_time = time.monotonic()
-                self.state = STATE_PAUSE_AFTER_ALIGN
+            # 2. ตั้งค่า Threshold ความต่างที่ยอมรับได้ (เช่น 10-15 cm)
+            # ถ้าต่างกันมากกว่านี้ แปลว่าเอียงกะเท่เร่ -> ต้องหมุนตัวเปล่าๆ ก่อน
+            PIVOT_THRESHOLD = 0.15 
 
+            if abs(diff) > PIVOT_THRESHOLD:
+                self.get_logger().info(f"STEEP ANGLE! Diff:{diff:.2f} -> PIVOT TURN")
+                
+                # ถ้า Front < Rear (ติดลบ) = หัวปักเข้า -> ต้องหมุนขวา
+                # ถ้า Front > Rear (บวก)   = หัวบานออก -> ต้องหมุนซ้าย
+                if self.us_front < self.us_rear:
+                    # หมุนขวาอยู่กับที่ (ล้อซ้ายเดินหน้า, ล้อขวาถอยหลัง)
+                    left_rpm, right_rpm = 30.0, -30.0
+                else:
+                    # หมุนซ้ายอยู่กับที่
+                    left_rpm, right_rpm = -30.0, 30.0
+                
+                # รีเซ็ตระยะทาง เพราะเราหมุนอยู่กับที่ ไม่นับว่าเดิน
+                self.total_dist = 0.0
+
+            else:
+                # 3. ถ้าความต่างน้อยแล้ว (เริ่มขนาน) -> ใช้ Dual PID เดินหน้าปรับละเอียดต่อ
+                pid_out, avg_dist = self._calculate_dual_pid()
+                left_rpm, right_rpm = self._pid_to_rpm(pid_out)
+
+                self.get_logger().info(f"FINE TUNE | Dist:{avg_dist:.2f} PID:{pid_out:.2f}", throttle_duration_sec=0.5)
+
+                # เช็คเงื่อนไขจบ (ต้องขนานจริงๆ และระยะได้)
+                is_parallel = abs(diff) < 0.03       # ต่างกันไม่เกิน 3cm
+                is_dist_ok  = abs(avg_dist - self.US_TARGET_DIST) < 0.05
+                
+                if abs(self.total_dist) >= 0.20 and is_parallel and is_dist_ok:
+                    self.get_logger().info("Aligned OK -> PREPARE BACK SCAN")
+                    self.pause_align_start_time = time.monotonic()
+                    self.state = STATE_PAUSE_AFTER_ALIGN
+                    
         # ── 7. PAUSE BEFORE BACK ──
         elif self.state == STATE_PAUSE_AFTER_ALIGN:
             left_rpm, right_rpm = 0.0, 0.0
