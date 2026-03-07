@@ -50,7 +50,7 @@ class PCVisionCombined(Node):
     
     # [NEW] พารามิเตอร์สำหรับกล้องวัดขนาดกะหล่ำ (กล้องล่าง)
     CAMERA_HEIGHT    = 50.0  # หน่วย cm 
-    PIXEL_CONSTANT   = 485.0 
+    PIXEL_CONSTANT   = 480.0 # 485 
     # ────────────────────────────────────────────────────────
 
     def __init__(self):

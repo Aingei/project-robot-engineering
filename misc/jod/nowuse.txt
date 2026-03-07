@@ -1,8 +1,13 @@
-send_camera.py
-test_ultra_pi.py
-com_segmrun.py
-ros2 launch galum_robot bringup.launch.py
-robust_drive.cpp
+send_camera.py #ส่งกล้อง
+com_add_cabbage.py #ประมวลผล
+run_pi_cabbage.py #รันวิ่งใน pi
+ros2 launch galum_robot bringup.launch.py #รัน esp วิ่ง
+ros2 launch galum_robot microros2.launch.py # รัน esp ultra
+
+--------------------------------------------------------------------------
+(galum v2)
+
+robust_drive.cpp 
 second_esp32.cpp (only have ultrasonic)
-#servo_ultra_step.cpp
+#servo_ultra_step.cpp ยังไม่ได้ลอง
 
