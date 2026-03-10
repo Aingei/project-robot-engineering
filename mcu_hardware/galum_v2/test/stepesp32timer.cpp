@@ -178,7 +178,7 @@ void IRAM_ATTR onStepTimer() {
     // current_dir_cw  = v_dir_cw_isr;
     // portEXIT_CRITICAL_ISR(&step_mux);
 
-    // v_pending_steps_isr += v_dir_cw_isr ? -1 : +1;
+    // v_pending_steps_isr += v_dir_cw_isr ? -1 servo: +1;
 
     // ถ้าเป็นโหมด "คลิก" เท่านั้นที่ไปยุ่ง pending_steps
     if (!continuous_mode) {                                  // ADD
