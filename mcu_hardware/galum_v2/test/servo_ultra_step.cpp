@@ -1,5 +1,5 @@
 // ============================================================================
-// ESP32 micro-ROS: 1 Stepper, 3 Servos, 2 Ultrasonics (Clean Test Version)
+// ESP32 micro-ROS: 1 Stepper, 4 Servos, 2 Ultrasonics (Integrated Version)
 // ============================================================================
 
 #include <Arduino.h>
@@ -17,7 +17,7 @@
 #include "driver/gpio.h"
 #include "esp32-hal-timer.h"
 #include <ESP32Servo.h>
-#include "../config/galum_move.h"
+#include "../config/galum_move.h" // Ensure this path matches your project structure
 
 // ------------- Macros -------------
 #define RCCHECK(fn)  { rcl_ret_t rc = (fn); if (rc != RCL_RET_OK) { rclErrorLoop(); } }
@@ -55,7 +55,7 @@ float us_data_buffer[2];
 enum AgentState { WAITING_AGENT, AGENT_AVAILABLE, AGENT_CONNECTED, AGENT_DISCONNECTED };
 AgentState state = WAITING_AGENT;
 
-Servo servo1, servo2, servo3;
+Servo servo1, servo2, servo3, servo4;
 
 // Stepper variables
 volatile long step_position = 0;
@@ -108,8 +108,10 @@ float getDistance(uint8_t trig, uint8_t echo) {
     digitalWrite(trig, LOW); delayMicroseconds(2);
     digitalWrite(trig, HIGH); delayMicroseconds(10);
     digitalWrite(trig, LOW);
+    
     long duration = pulseIn(echo, HIGH, ECHO_TIMEOUT_US);
     if (duration == 0) return 0.0f;
+    
     float dist_m = (duration * SOUND_SPEED) / 200.0f;
     if (dist_m > MAX_RANGE_M || dist_m < MIN_RANGE_M) return 0.0f;
     return dist_m;
@@ -182,9 +184,12 @@ void servoCallback(const void *msgin) {
   double deg1 = max(0.0, min(180.0, m->linear.x));
   double deg2 = max(0.0, min(180.0, m->linear.y));
   double deg3 = max(0.0, min(180.0, m->linear.z));
+  double deg4 = max(0.0, min(180.0, m->angular.x)); // 4th servo mapped to angular.x
+  
   servo1.write((int)llround(deg1));
   servo2.write((int)llround(deg2));
   servo3.write((int)llround(deg3));
+  servo4.write((int)llround(deg4));
 }
 
 void controlCallback(rcl_timer_t *, int64_t) {
@@ -202,14 +207,22 @@ void controlCallback(rcl_timer_t *, int64_t) {
   servo_status_msg.linear.x = (double)servo1.read();
   servo_status_msg.linear.y = (double)servo2.read();
   servo_status_msg.linear.z = (double)servo3.read();
+  servo_status_msg.angular.x = (double)servo4.read(); 
   RCSOFTCHECK(rcl_publish(&servo_status_pub, &servo_status_msg, NULL));
 }
 
 void usTimerCallback(rcl_timer_t *, int64_t) {
-    float dist_f = getDistance(TRIG_F, ECHO_F); delay(15); 
+    // อ่านค่า Sensor ทีละตัว (สำคัญมากต้องมี Delay กันคลื่นตีกัน)
+    float dist_f = getDistance(TRIG_F, ECHO_F); 
+    delay(15); 
     float dist_r = getDistance(TRIG_R, ECHO_R);
 
-    us_msg.data.data[0] = dist_f; us_msg.data.data[1] = dist_r; us_msg.data.size = 2;
+    // แพ็คข้อมูลลง Array
+    us_msg.data.data[0] = dist_f; 
+    us_msg.data.data[1] = dist_r; 
+    us_msg.data.size = 2;
+    
+    // ส่งข้อมูลแบบ Best Effort
     RCSOFTCHECK(rcl_publish(&us_publisher, &us_msg, NULL));
 }
 
@@ -218,13 +231,16 @@ void setup() {
   Serial.begin(115200);
   set_microros_serial_transports(Serial);
 
+  // Initialize all 4 servos
   servo1.attach(SERVO1_PIN); servo1.setPeriodHertz(50); servo1.write(90);
   servo2.attach(SERVO2_PIN); servo2.setPeriodHertz(50); servo2.write(90);
   servo3.attach(SERVO3_PIN); servo3.setPeriodHertz(50); servo3.write(90);
+  servo4.attach(SERVO4_PIN); servo4.setPeriodHertz(50); servo4.write(90);
 
   pinMode(STEP_PIN, OUTPUT); pinMode(DIR_PIN, OUTPUT); pinMode(LED_PIN, OUTPUT);
   gpio_set_level((gpio_num_t)STEP_PIN, 0); gpio_set_level((gpio_num_t)DIR_PIN, 0);
 
+  // Initialize Ultrasonic Pins
   pinMode(TRIG_F, OUTPUT); pinMode(ECHO_F, INPUT); digitalWrite(TRIG_F, LOW);
   pinMode(TRIG_R, OUTPUT); pinMode(ECHO_R, INPUT); digitalWrite(TRIG_R, LOW);
 
@@ -267,15 +283,20 @@ bool createEntities() {
   
   RCCHECK(rclc_publisher_init_default(&status_pub, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist), "/galum/stepper/status"));
   RCCHECK(rclc_publisher_init_default(&servo_status_pub, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist), "/galum/servo/status"));
+  
+  // Publisher Config (Topic: /galum/us_dual)
   RCCHECK(rclc_publisher_init_best_effort(&us_publisher, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32MultiArray), "/galum/us_dual"));
 
   RCCHECK(rclc_timer_init_default(&control_timer, &support, RCL_MS_TO_NS(20), controlCallback));
+  
+  // Timer Config สำหรับ Ultrasonic
   RCCHECK(rclc_timer_init_default(&us_timer, &support, RCL_MS_TO_NS(US_PUBLISH_PERIOD_MS), usTimerCallback));
 
+  // Initialize Array Memory
   us_msg.data.capacity = 2; us_msg.data.size = 2; us_msg.data.data = us_data_buffer;
 
   executor = rclc_executor_get_zero_initialized_executor();
-  RCCHECK(rclc_executor_init(&executor, &support.context, 4, &allocator)); // Back to 4 (2 subs + 2 timers)
+  RCCHECK(rclc_executor_init(&executor, &support.context, 4, &allocator)); 
   RCCHECK(rclc_executor_add_subscription(&executor, &cmd_sub, &cmd_msg, &cmdCallback, ON_NEW_DATA));
   RCCHECK(rclc_executor_add_subscription(&executor, &servo_sub, &servo_msg, &servoCallback, ON_NEW_DATA));
   RCCHECK(rclc_executor_add_timer(&executor, &control_timer));
