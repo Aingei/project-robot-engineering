@@ -20,11 +20,11 @@ class TestStepper(Node):
         msg = Twist()
         
         if self.is_cw:
-            self.get_logger().info(f"สั่ง Stepper หมุน ตามเข็ม (CW) {self.pulses} พัลส์")
-            msg.linear.x = 1.0   # 1.0 = ตามเข็ม (CW)
+            self.get_logger().info(f"สั่ง Stepper ลง หมุน ตามเข็ม (CW) {self.pulses} พัลส์")
+            msg.linear.x = -1.0   # 1.0 = ตามเข็ม (CW)
         else:
-            self.get_logger().info(f"สั่ง Stepper หมุน ทวนเข็ม (CCW) {self.pulses} พัลส์")
-            msg.linear.x = -1.0  # -1.0 = ทวนเข็ม (CCW)
+            self.get_logger().info(f"สั่ง Stepper ขึ้น หมุน ทวนเข็ม (CCW) {self.pulses} พัลส์")
+            msg.linear.x = 1.0  # -1.0 = ทวนเข็ม (CCW)
             
         msg.linear.y = self.pulses
         self.pub.publish(msg)

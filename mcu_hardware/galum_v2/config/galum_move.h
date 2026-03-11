@@ -45,8 +45,8 @@ ROBOT ORIENTATION
 #define LED_PIN   2
 
 // Servos
-#define SERVO1_PIN 26 //เปิดปิดก้านบน360
-#define SERVO2_PIN 27 //พับแขน180
+#define SERVO1_PIN 26 //พับแขน180
+#define SERVO2_PIN 27 //เปิดปิดก้านบน360 
 #define SERVO3_PIN 14 //หมุนปลูก180
 #define SERVO4_PIN 19 //เจาะดิน360
 
