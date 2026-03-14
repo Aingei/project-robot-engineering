@@ -63,7 +63,7 @@ class RobotMaster(Node):
 
         # ── Ultrasonic Config ─────────────────────────────────
         self.US_TARGET_DIST = 0.04 
-        self.FRONT_OFFSET = -0.015
+        self.FRONT_OFFSET  = -0.015
         self.REAR_OFFSET = 0.08
         
         # ── PID GAINS ─────────────────────────────────────────

@@ -16,8 +16,10 @@ STATE_APPROACH            = 1
 STATE_PAUSE               = 15
 STATE_TURNL               = 3
 STATE_FORWARD_AFTER_TURN  = 5
-STATE_TURNR               = 16   # 🛠️ [เพิ่มใหม่] State สำหรับหมุนขวา
+STATE_TURNR               = 16   
 STATE_SEARCH_WALL_ROTATE  = 8
+STATE_HARD_TURN_RIGHT_3S  = 17   
+STATE_FORWARD_RETRY_2S    = 18   
 STATE_ALIGN_WALL          = 4
 STATE_PAUSE_AFTER_ALIGN   = 7
 STATE_BACK_TO_TAG         = 6
@@ -58,7 +60,9 @@ class RobotMaster(Node):
         self.align_speed    = 0.25
         self.ticks_per_rev  = 7436
         self.m_per_tick     = (2 * math.pi * self.wheel_radius) / self.ticks_per_rev
-        self.stop_distance_threshold = 0.45
+        
+        # 🛠️ ตัวแปรสำหรับเช็คฝั่งการเดิน
+        self.path_mode = 0         # 0 = ยังไม่กำหนด, 1 = ฝั่งขวา (โค้ด 1), 2 = ฝั่งซ้าย (โค้ด 2)
 
         # ── Ultrasonic Config ─────────────────────────────────
         self.US_TARGET_DIST = 0.04 
@@ -66,7 +70,7 @@ class RobotMaster(Node):
         self.REAR_OFFSET = 0.08
         
         # ── PID GAINS ─────────────────────────────────────────
-        self.KP_US_DIST  = 5.0       
+        self.KP_US_DIST  = 5.0     
         self.KP_US_ANGLE = 4.5      
         self.KI_US = 0.1            
         self.KD_US = 0.8            
@@ -106,7 +110,10 @@ class RobotMaster(Node):
         self.blind_back_start_time = 0.0
         self.sequence_pause_start_time = 0.0
         self.plant_timer = time.monotonic() 
-        self.turnr_start_time = 0.0 # 🛠️ [เพิ่มใหม่] Timer สำหรับหมุนขวา
+        self.search_wall_start_time = 0.0  
+        self.hard_turn_start_time = 0.0    
+        self.forward_retry_start_time = 0.0
+        self.turnr_start_time = 0.0 
 
         self.sequence_steps = []
         self.current_step_index = 0
@@ -124,19 +131,23 @@ class RobotMaster(Node):
         self.stepper_pub = self.create_publisher(Twist, '/galum/stepper/angle', 10)
         self.debug_pid_pub = self.create_publisher(Float32, "/debug/pid_output", 10)
         self.save_img_pub = self.create_publisher(String, "/galum/save_image_cmd", 10)
+        self.dist_pub = self.create_publisher(Float32, "/galum/current_dist", 10)
 
         # ── Subscribers ──
         self.create_subscription(Float32MultiArray, "/galum/us_dual", self.us_cb, qos.qos_profile_sensor_data)
         self.create_subscription(Float32MultiArray, "/galum/vision_packet", self.vision_cb, qos.qos_profile_sensor_data)
         self.create_subscription(Twist, "/galum/encoder", self.encoder_cb, qos.qos_profile_sensor_data)
         
+        # 🛠️ ระบบ Smooth Servo 1 
         self.current_servo1 = 90.0
-        self.current_servo2 = 90.0
-        self.current_servo3 = 90.0
+        self.target_servo1  = 90.0   
+
+        self.current_servo2 = 180.0 #close
+        self.current_servo3 = 180.0 #close
         self.current_servo4 = 90.0
 
         self.create_timer(0.05, self.control_loop)
-        self.get_logger().info("✅ Robot Master: Navigation + Turn Right Added + Planting")
+        self.get_logger().info("✅ Robot Master: Navigation Auto Branching (Left/Right)")
 
     # ─────────────────────────────────────────────────────
     #  Callbacks & Helpers
@@ -185,10 +196,25 @@ class RobotMaster(Node):
         self.total_dist += (d / 4.0)
         self.prev_ticks = curr
 
+    def _reset_align_state(self):
+        self.total_dist = 0.0
+        self.integral_error = 0.0
+        self.prev_total_error = 0.0
+        self.history_time.clear()
+        self.history_dist.clear()
+        self.history_target.clear()
+        self.start_plot_time = time.monotonic()
+        self.has_plotted = False
+        self.align_start_time = time.monotonic()
+
     def _calculate_dual_pid(self):
         if not self.us_valid: return 0.0, 0.0
         avg_dist = self.current_avg_dist
         err_dist = avg_dist - self.US_TARGET_DIST 
+        
+        MAX_ERR_DIST = 0.20 
+        err_dist = max(-MAX_ERR_DIST, min(MAX_ERR_DIST, err_dist))
+
         real_front = self.us_front 
         real_rear  = self.us_rear + self.REAR_OFFSET
         diff_angle = real_front - real_rear
@@ -255,16 +281,28 @@ class RobotMaster(Node):
         if self.state == STATE_SERVO1_FIRST:
             left_rpm, right_rpm = 0.0, 0.0
             if time.monotonic() - self.plant_timer > 1.0: 
-                self.current_servo1 = 180.0
-                self.get_logger().info("Init: Servo 1 Set (180)")
+                self.target_servo1 = 180.0 
+                self.get_logger().info("Init: Servo 1 Start Opening to 180")
                 self.state = STATE_SEARCH 
                 
         elif self.state == STATE_SEARCH:
-            if self.tag_found: self.state = STATE_APPROACH
-            else: rpm = self._m_s_to_rpm(self.walk_speed); left_rpm, right_rpm = rpm, rpm
+            if self.tag_found: 
+                # 🛠️ ตรวจสอบค่า Error เพื่อกำหนดโหมด (ซ้าย/ขวา)
+                if self.path_mode == 0:
+                    if self.tag_err < 0:
+                        self.path_mode = 1
+                        self.get_logger().info("📍 Tag Err < 0 -> Use Code 1 (Right Start)")
+                    else:
+                        self.path_mode = 2
+                        self.get_logger().info("📍 Tag Err >= 0 -> Use Code 2 (Left Start)")
+                self.state = STATE_APPROACH
+            else: 
+                rpm = self._m_s_to_rpm(self.walk_speed); left_rpm, right_rpm = rpm, rpm
 
         elif self.state == STATE_APPROACH:
-            is_close = (0.0 < self.current_z_dist < self.stop_distance_threshold)
+            stop_dist = 0.45 if self.path_mode == 1 else 0.6
+            is_close = (0.0 < self.current_z_dist < stop_dist)
+            
             if self.tag_found and is_close:
                 self.pause_start_time = time.monotonic(); self.state = STATE_PAUSE; self.send_rpm(0, 0); return
             elif not self.tag_found: self.state = STATE_SEARCH
@@ -274,43 +312,82 @@ class RobotMaster(Node):
             if time.monotonic() - self.pause_start_time > 2.0:
                 self.turn_start_time = time.monotonic(); self.state = STATE_TURNL
 
+        # ═════════════════════════════════════════════════════════════════════
+        # 🟢 โค้ดตรงนี้แยกตามฝั่งซ้าย-ขวา 
+        # ═════════════════════════════════════════════════════════════════════
         elif self.state == STATE_TURNL:
-            if time.monotonic() - self.turn_start_time < 6.3: left_rpm, right_rpm = -40.0, 40.0
+            if self.path_mode == 1:
+                # ── โค้ด 1 ──
+                if time.monotonic() - self.turn_start_time < 6.3: left_rpm, right_rpm = -60.0, 60.0
+                else:
+                    self.get_logger().info("Turn done → FWD_WALK")
+                    self.forward_start_time = time.monotonic(); self.state = STATE_FORWARD_AFTER_TURN
             else:
-                self.get_logger().info("Turn done → FWD_WALK")
-                self.forward_start_time = time.monotonic(); self.state = STATE_FORWARD_AFTER_TURN
+                # ── โค้ด 2 ──
+                if time.monotonic() - self.turn_start_time < 3.7: left_rpm, right_rpm = -80.0, 80.0
+                else:
+                    self.get_logger().info("Turn done → FWD_WALK")
+                    self.forward_start_time = time.monotonic(); self.state = STATE_FORWARD_AFTER_TURN
 
         elif self.state == STATE_FORWARD_AFTER_TURN:
-            if time.monotonic() - self.forward_start_time < 2.9:
-                rpm = self._m_s_to_rpm(self.walk_speed); left_rpm, right_rpm = rpm, rpm
+            if self.path_mode == 1:
+                # ── โค้ด 1 ──
+                if time.monotonic() - self.forward_start_time < 7.0:
+                    rpm = self._m_s_to_rpm(self.walk_speed); left_rpm, right_rpm = rpm, rpm
+                else:
+                    self.get_logger().info("Walk Done -> Turn RIGHT 2s")
+                    self.turnr_start_time = time.monotonic()
+                    self.state = STATE_SEARCH_WALL_ROTATE  
             else:
-                self.get_logger().info("Walk Done -> Turn RIGHT 2s")
-                self.turnr_start_time = time.monotonic()
-                self.state = STATE_TURNR  # 🛠️ [เพิ่มใหม่] โยนเข้า State หมุนขวา
-
-        # 🛠️ [เพิ่มใหม่] หมุนขวา 2 วินาที
-        elif self.state == STATE_TURNR:
-            if time.monotonic() - self.turnr_start_time < 2.0:
-                # ส่ง RPM: ล้อซ้ายเดินหน้า ล้อขวาถอยหลัง = หุ่นหมุนขวา
-                left_rpm, right_rpm = 30.0, -30.0 
-            else:
-                self.get_logger().info("Turn RIGHT Done -> Rotating to find wall")
-                self.state = STATE_SEARCH_WALL_ROTATE
+                # ── โค้ด 2 ──
+                if time.monotonic() - self.forward_start_time < 4.0:
+                    rpm = self._m_s_to_rpm(self.walk_speed); left_rpm, right_rpm = rpm, rpm
+                else:
+                    self.get_logger().info("Walk Done -> Normal search (3s limit)")
+                    self.search_wall_start_time = time.monotonic() 
+                    self.state = STATE_SEARCH_WALL_ROTATE
 
         elif self.state == STATE_SEARCH_WALL_ROTATE:
-            if self.us_valid:
-                self.get_logger().info(f"Found! -> ALIGN")
-                self.total_dist = 0.0; self.integral_error = 0.0; self.prev_total_error = 0.0
-                self.history_time.clear(); self.history_dist.clear(); self.history_target.clear()
-                self.start_plot_time = time.monotonic(); self.has_plotted = False
-                self.align_start_time = time.monotonic(); self.state = STATE_ALIGN_WALL
+            if self.path_mode == 1:
+                # ── โค้ด 1 ──
+                if self.us_valid:
+                    self.get_logger().info(f"Found! -> ALIGN")
+                    self.total_dist = 0.0; self.integral_error = 0.0; self.prev_total_error = 0.0
+                    self.history_time.clear(); self.history_dist.clear(); self.history_target.clear()
+                    self.start_plot_time = time.monotonic(); self.has_plotted = False
+                    self.align_start_time = time.monotonic(); self.state = STATE_ALIGN_WALL
+                else:
+                    left_rpm, right_rpm = 80.0, -80.0 
             else:
-                left_rpm, right_rpm = 30.0, -30.0 
+                # ── โค้ด 2 ──
+                if self.us_valid:
+                    self.get_logger().info("✅ [ROTATE] Found Wall! -> ALIGN")
+                    self._reset_align_state()
+                    self.state = STATE_ALIGN_WALL
+                else:
+                    elapsed = time.monotonic() - self.search_wall_start_time
+                    if elapsed > 3.0: 
+                        self.get_logger().info("⏱️ [ROTATE] Timeout 3s -> HARD TURN RIGHT 5s")
+                        self.hard_turn_start_time = time.monotonic()
+                        self.state = STATE_FORWARD_RETRY_2S
+                    else:
+                        left_rpm, right_rpm = 80.0, -80.0  
 
+        elif self.state == STATE_FORWARD_RETRY_2S:
+            if time.monotonic() - self.forward_retry_start_time < 4.0:
+                rpm = self._m_s_to_rpm(self.walk_speed); left_rpm, right_rpm = rpm, rpm
+            else:
+                self.get_logger().info(" [FORWARD] Done 4s -> BACK TO ROTATE SEARCH")
+                self.search_wall_start_time = time.monotonic()
+                self.state = STATE_SEARCH_WALL_ROTATE
+        # ═════════════════════════════════════════════════════════════════════
+
+        # ── กลับมารวมกัน ──
         elif self.state == STATE_ALIGN_WALL:
             if time.monotonic() - self.align_start_time > 20.0:
                 self.pause_align_start_time = time.monotonic(); self.state = STATE_PAUSE_AFTER_ALIGN
             elif not self.us_valid:
+                self.search_wall_start_time = time.monotonic()
                 self.state = STATE_SEARCH_WALL_ROTATE
             else:
                 pid_out, avg_dist = self._calculate_dual_pid()
@@ -342,7 +419,7 @@ class RobotMaster(Node):
                     left_rpm, right_rpm = self._get_reverse_rpm(back_speed)
 
         elif self.state == STATE_BACK_BLIND:
-            if time.monotonic() - self.blind_back_start_time < 6.5:
+            if time.monotonic() - self.blind_back_start_time < 7.5:
                 rpm = self._m_s_to_rpm(-self.walk_speed * 0.5); left_rpm, right_rpm = rpm, rpm
             else:
                 self.send_rpm(0, 0); self.total_dist = 0.0; self.current_step_index = 0
@@ -354,19 +431,19 @@ class RobotMaster(Node):
                 if self.current_step_index >= 3: self._set_scan_mode(2.0)
                 self.state = STATE_RUN_SEQUENCE
 
-        # ── เดินตามระยะทาง (เช็คว่าต้องปลูก หรือข้ามไปสแกน) ──
         elif self.state == STATE_RUN_SEQUENCE:
             if self.current_step_index >= len(self.sequence_steps):
                 self.get_logger().info("ALL SEQUENCES COMPLETED!"); self._set_scan_mode(0.0); self.state = STATE_WAIT
             else:
                 target_dist = self.sequence_steps[self.current_step_index]
                 if abs(self.total_dist) >= target_dist:
-                    self.send_rpm(0, 0) # สั่งหยุดล้อ
+                    self.send_rpm(0, 0) 
                     self.logged_cabbage = False 
                     
                     if self.current_step_index < 2:
                         self.get_logger().info(f"📍 Reached Step {self.current_step_index + 1} ({target_dist}m) -> START PLANTING")
-                        self.current_servo1, self.current_servo2, self.current_servo3, self.current_servo4 = 90.0, 90.0, 90.0, 90.0
+                        self.target_servo1 = 90.0
+                        self.current_servo2, self.current_servo3, self.current_servo4 = 180.0, 180.0, 90.0
                         self.plant_timer = time.monotonic()
                         
                         self.state = STATE_SERVO1_ON  
@@ -377,15 +454,14 @@ class RobotMaster(Node):
                 else:
                     rpm = self._m_s_to_rpm(self.walk_speed); left_rpm, right_rpm = rpm, rpm
 
-
         # ==========================================================
-        # 2. PLANTING STATES (ทำงานเฉพาะตอน Index < 2)
+        # 2. PLANTING STATES 
         # ==========================================================
         elif self.state == STATE_SERVO1_ON:
             left_rpm, right_rpm = 0.0, 0.0
-            if time.monotonic() - self.plant_timer > 1.0: 
-                self.current_servo1 = 90.0
-                self.get_logger().info("Planting: Servo 1 Open (180)")
+            if time.monotonic() - self.plant_timer > 2.0: 
+                self.target_servo1 = 90.0
+                self.get_logger().info("Planting: Servo 1 Start Opening (90)")
                 self.plant_timer = time.monotonic(); self.state = STATE_PLANT_INIT
                 
         elif self.state == STATE_PLANT_INIT:
@@ -412,7 +488,7 @@ class RobotMaster(Node):
         elif self.state == STATE_PLANT_S4_SWAP:
             left_rpm, right_rpm = 0.0, 0.0
             if time.monotonic() - self.plant_timer > 2.0:
-                self.send_stepper_cmd(1.0, 800)
+                self.send_stepper_cmd(1.0, 350)
                 self.get_logger().info("Planting: Stepper Up 800")
                 self.plant_timer = time.monotonic(); self.state = STATE_PLANT_STP_UP1
 
@@ -429,12 +505,11 @@ class RobotMaster(Node):
                 self.get_logger().info("Planting: Move FORWARD 1.5s")
                 self.plant_timer = time.monotonic(); self.state = STATE_PLANT_MOVE_FWD
 
-        # --- 🚜 เดินหน้า 1.5 วินาที ---
         elif self.state == STATE_PLANT_MOVE_FWD:
             if time.monotonic() - self.plant_timer < 0.5:
                 rpm = self._m_s_to_rpm(self.walk_speed); left_rpm, right_rpm = rpm, rpm
             else:
-                self.send_rpm(0, 0) # หยุดเดิน
+                self.send_rpm(0, 0) 
                 left_rpm, right_rpm = 0.0, 0.0
                 self.send_stepper_cmd(-1.0, 150)
                 self.get_logger().info("Planting: Stepper Down 150")
@@ -445,43 +520,42 @@ class RobotMaster(Node):
             if time.monotonic() - self.plant_timer > 2.0:
                 self.current_servo3 = 0.0
                 self.get_logger().info("Planting: Servo 3 Open (0)")
-                self.plant_timer = time.monotonic(); self.state = STATE_PLANT_S3_0
-                
-        elif self.state == STATE_PLANT_S3_0:
-            left_rpm, right_rpm = 0.0, 0.0
-            if time.monotonic() - self.plant_timer > 2.0:
-                self.current_servo3 = 100.0
-                self.get_logger().info("Planting: Servo 3 Close (100)")
                 self.plant_timer = time.monotonic(); self.state = STATE_PLANT_S3_100
-
+                
         elif self.state == STATE_PLANT_S3_100:
             left_rpm, right_rpm = 0.0, 0.0
             if time.monotonic() - self.plant_timer > 2.0:
                 self.send_stepper_cmd(1.0, 800)
                 self.get_logger().info("Planting: Stepper Up 800")
-                self.plant_timer = time.monotonic(); self.state = STATE_PLANT_STP_UP2
+                self.plant_timer = time.monotonic(); self.state = STATE_PLANT_S3_0
                 
+        elif self.state == STATE_PLANT_S3_0:
+            left_rpm, right_rpm = 0.0, 0.0
+            if time.monotonic() - self.plant_timer > 2.0:
+                self.current_servo3 = 180.0
+                self.get_logger().info("Planting: Servo 3 Close (100)")
+                self.plant_timer = time.monotonic(); self.state = STATE_PLANT_STP_UP2
+  
         elif self.state == STATE_PLANT_STP_UP2:
             left_rpm, right_rpm = 0.0, 0.0
             if time.monotonic() - self.plant_timer > 4.0:
                 self.get_logger().info("Planting: Move BACKWARD 1.5s")
                 self.plant_timer = time.monotonic(); self.state = STATE_PLANT_MOVE_BWD
                 
-        # --- ถอยหลัง 1.5 วินาที ---
         elif self.state == STATE_PLANT_MOVE_BWD:
             if time.monotonic() - self.plant_timer < 0.5:
                 rpm = self._m_s_to_rpm(-self.walk_speed); left_rpm, right_rpm = rpm, rpm
             else:
-                self.send_rpm(0, 0) # หยุด
+                self.send_rpm(0, 0) 
                 left_rpm, right_rpm = 0.0, 0.0
-                self.current_servo2 = 180.0
+                self.current_servo2 = 90.0
                 self.get_logger().info("Planting: Servo 2 (180)")
                 self.plant_timer = time.monotonic(); self.state = STATE_PLANT_S2_180
 
         elif self.state == STATE_PLANT_S2_180:
             left_rpm, right_rpm = 0.0, 0.0
             if time.monotonic() - self.plant_timer > 2.0:
-                self.current_servo2 = 0.0
+                self.current_servo2 = 180.0
                 self.get_logger().info("Planting: Servo 2 (0)")
                 self.plant_timer = time.monotonic(); self.state = STATE_PLANT_S2_0
 
@@ -489,19 +563,20 @@ class RobotMaster(Node):
             left_rpm, right_rpm = 0.0, 0.0
             if time.monotonic() - self.plant_timer > 2.0:
                 self.get_logger().info("Planting Done -> Prepare next step")
-                self.current_servo1, self.current_servo2, self.current_servo3, self.current_servo4 = 90.0, 90.0, 90.0, 90.0
+                self.target_servo1 = 90.0  
+                self.current_servo2, self.current_servo3, self.current_servo4 = 180.0, 180.0, 90.0
                 
                 self.plant_timer = time.monotonic() 
                 self.state = STATE_SERVO1_OFF 
         
         elif self.state == STATE_SERVO1_OFF:
             left_rpm, right_rpm = 0.0, 0.0
-            if time.monotonic() - self.plant_timer > 1.0: 
-                self.current_servo1 = 180.0
-                self.get_logger().info("Planting: Servo 1 Closed (90)")
+            if time.monotonic() - self.plant_timer > 2.0: 
+                self.target_servo1 = 180.0
+                self.get_logger().info("Planting: Servo 1 Closing (180)")
                 self.logged_cabbage = False 
                 self.sequence_pause_start_time = time.monotonic()
-                self.state = STATE_PAUSE_SEQUENCE # เข้าสู่โหมดพักก่อนเดินต่อ
+                self.state = STATE_PAUSE_SEQUENCE 
 
         # ==========================================================
         # 3. CABBAGE LOGGING & RESUME NAVIGATION
@@ -510,23 +585,20 @@ class RobotMaster(Node):
             left_rpm, right_rpm = 0.0, 0.0
             elapsed = time.monotonic() - self.sequence_pause_start_time
             
-            # ถ่ายรูปกะหล่ำ (ถ้าเป็นการเดินสเต็ปที่ >= 3)
             if self.current_step_index >= 3 and elapsed > 1.0 and not self.logged_cabbage:
                 plant_num = self.current_step_index - 2
                 self.get_logger().info(f"🟢 ต้นที่ {plant_num} ขนาดกะหล่ำ: {self.cabbage_diameter:.2f} cm")
                 self.logged_cabbage = True
                 msg = String(); msg.data = f"cabbage_plant_{plant_num}.jpg"; self.save_img_pub.publish(msg)
                 
-            # รอ 2 วิแล้วค่อยเดินทางต่อ
             if elapsed > 2.0:
                 self.total_dist = 0.0
                 self.current_step_index += 1
                 
-                # เปิดกล้องล่วงหน้าถ้าก้าวถัดไปต้องใช้กล้อง
                 if self.current_step_index >= 3: self._set_scan_mode(2.0)
                 else: self._set_scan_mode(0.0)
                 
-                self.state = STATE_RUN_SEQUENCE # กลับไปเดินหาจุดถัดไป!
+                self.state = STATE_RUN_SEQUENCE 
 
         elif self.state == STATE_WAIT:
             left_rpm, right_rpm = 0.0, 0.0
@@ -537,8 +609,19 @@ class RobotMaster(Node):
         self.send_rpm(left_rpm, right_rpm)
         msg_p = Float32(); msg_p.data = float(pid_out); self.debug_pid_pub.publish(msg_p)
         
+        # 🛠️ ระบบคำนวณปรับมุม Servo 1 ให้สมูท (ทำงานทุก 0.05 วินาที)
+        servo1_speed = 1.0  
+        if self.current_servo1 < self.target_servo1:
+            self.current_servo1 = min(self.current_servo1 + servo1_speed, self.target_servo1)
+        elif self.current_servo1 > self.target_servo1:
+            self.current_servo1 = max(self.current_servo1 - servo1_speed, self.target_servo1)
+
         # ── ยิงค่า Servo ย้ำๆ ทุก 0.05 วิ ──
         self.send_servo_cmd()
+        
+        msg_dist = Float32()
+        msg_dist.data = float(self.total_dist)
+        self.dist_pub.publish(msg_dist)
 
         if self.us_valid and (self.state == STATE_ALIGN_WALL or self.state == STATE_BACK_TO_TAG):
             current_t = time.monotonic() - self.start_plot_time
