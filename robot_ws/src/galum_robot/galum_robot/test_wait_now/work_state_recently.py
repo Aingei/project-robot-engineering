@@ -67,8 +67,8 @@ class RobotMaster(Node):
         self.REAR_OFFSET = 0.08
         
         # ── PID GAINS ─────────────────────────────────────────
-        self.KP_US_DIST  = 5.0     
-        self.KP_US_ANGLE = 4.5      
+        self.KP_US_DIST  = 5.0      #5.0
+        self.KP_US_ANGLE = 4.5      #4.5
         self.KI_US = 0.1            
         self.KD_US = 0.8            
         

@@ -1,6 +1,6 @@
 send_camera.py #ส่งกล้อง
 com_add_cabbage.py #ประมวลผล
-work_state_recently.py #รันวิ่งใน pi
+run_pi_state_done.py #รันวิ่งใน pi
 #tuned_walk.py (basecode ของของจิง)
 ros2 launch galum_robot bringup.launch.py #รัน esp วิ่ง
 ros2 launch galum_robot microros2.launch.py # รัน esp ultra
@@ -10,5 +10,5 @@ ros2 launch galum_robot microros2.launch.py # รัน esp ultra
 
 robust_drive.cpp 
 #second_esp32.cpp (only have ultrasonic)
-servo_ultra_step.cpp
-
+#servo_ultra_step.cpp
+test_imu_actuator.py

@@ -245,6 +245,7 @@ def main(args=None):
     finally:
         node.destroy_node()
         cv2.destroyAllWindows()
+        cv2.waitKey(1)
         rclpy.shutdown()
 
 if __name__ == '__main__':

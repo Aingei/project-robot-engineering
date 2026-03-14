@@ -1,6 +1,6 @@
 #include "imu_bno055.h"
 
-IMU_BNO055::IMU_BNO055() : bno(Adafruit_BNO055(55, 0x29)) {}
+IMU_BNO055::IMU_BNO055() : bno(Adafruit_BNO055(55, 0x28)) {}
 
 bool IMU_BNO055::init() {
   if (!bno.begin()) {

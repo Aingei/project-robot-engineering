@@ -9,6 +9,8 @@
 #include <sensor_msgs/msg/imu.h>
 #include <sensor_msgs/msg/magnetic_field.h>
 
+//sda 21 scl 22
+
 // Define the IMU class
 class IMU_BNO055 {
 public:
