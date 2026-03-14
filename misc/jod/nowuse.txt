@@ -1,6 +1,7 @@
 send_camera.py #ส่งกล้อง
 com_add_cabbage.py #ประมวลผล
-test_wait_now -> test.py #รันวิ่งใน pi
+work_state_recently.py #รันวิ่งใน pi
+#tuned_walk.py (basecode ของของจิง)
 ros2 launch galum_robot bringup.launch.py #รัน esp วิ่ง
 ros2 launch galum_robot microros2.launch.py # รัน esp ultra
 
