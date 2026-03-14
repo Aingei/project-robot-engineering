@@ -21,14 +21,16 @@
 // ─────────────────────────────────────────────
 //  Constants & Tuning
 // ─────────────────────────────────────────────
-static constexpr uint32_t AGENT_PING_INTERVAL_MS   = 500;   // how often to ping while waiting
-static constexpr uint32_t AGENT_PING_TIMEOUT_MS     = 200;   // max wait for ping reply
-static constexpr uint8_t  AGENT_PING_RETRIES        = 3;     // retries before declaring disconnected
-static constexpr uint32_t CONTROL_PERIOD_MS         = 20;    // main control loop period
-static constexpr uint32_t HEALTH_CHECK_INTERVAL_MS  = 200;   // liveness check period
-static constexpr uint32_t CMD_TIMEOUT_MS            = 500;   // stop motors if no cmd received
-static constexpr uint32_t RECONNECT_BACKOFF_MS      = 2000;  // wait before reattempting connect
-static constexpr uint8_t  STATUS_LED_PIN            = 2;     // built-in LED for status
+static constexpr uint32_t AGENT_PING_INTERVAL_MS   = 500;   
+static constexpr uint32_t AGENT_PING_TIMEOUT_MS     = 200;   
+static constexpr uint8_t  AGENT_PING_RETRIES        = 3;     
+// 🛠️ แก้จาก 20ms เป็น 50ms ลดคอขวดแบนด์วิดท์
+static constexpr uint32_t CONTROL_PERIOD_MS         = 50;    
+// 🛠️ ปรับ Health check ให้นานขึ้น ไม่แย่งแบนด์วิดท์ตอนรันปกติ
+static constexpr uint32_t HEALTH_CHECK_INTERVAL_MS  = 2000;  
+static constexpr uint32_t CMD_TIMEOUT_MS            = 500;   
+static constexpr uint32_t RECONNECT_BACKOFF_MS      = 2000;  
+static constexpr uint8_t  STATUS_LED_PIN            = 2;     
 
 // Robot geometry
 static constexpr float WHEEL_SEPARATION = 0.20f;
@@ -40,10 +42,10 @@ static constexpr float MAX_RPM          = 150.0f;
 // ─────────────────────────────────────────────
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x29);
 
-ESP32Encoder encoderFL; // Front Left  (Motor A)
-ESP32Encoder encoderFR; // Front Right (Motor B)
-ESP32Encoder encoderRL; // Rear Left   (Motor C)
-ESP32Encoder encoderRR; // Rear Right  (Motor D)
+ESP32Encoder encoderFL; 
+ESP32Encoder encoderFR; 
+ESP32Encoder encoderRL; 
+ESP32Encoder encoderRR; 
 
 // ─────────────────────────────────────────────
 //  Helpers
@@ -117,21 +119,17 @@ void setup()
 
     Wire.begin(21, 22);
 
-    // Encoders
     encoderFL.attachFullQuad(14, 27); encoderFL.clearCount();
     encoderFR.attachFullQuad(34, 35); encoderFR.clearCount();
     encoderRL.attachFullQuad(4, 21);  encoderRL.clearCount();
     encoderRR.attachFullQuad(36, 39); encoderRR.clearCount();
 
-    // IMU
     bno.begin();
     bno.setExtCrystalUse(true);
 
-    // Motor GPIO
     const uint8_t motorPins[] = {AIN1, AIN2, BIN1, BIN2, CIN1, CIN2, DIN1, DIN2};
     for (uint8_t pin : motorPins) { pinMode(pin, OUTPUT); }
 
-    // PWM channels
     const uint8_t pwmChannels[] = {
         PWM_CHANNEL_AIN1, PWM_CHANNEL_AIN2,
         PWM_CHANNEL_BIN1, PWM_CHANNEL_BIN2,
@@ -157,59 +155,48 @@ void loop()
 
     switch (agentState)
     {
-    // ── Waiting: ping every AGENT_PING_INTERVAL_MS ──────────────────────────
     case AgentState::WAITING_AGENT:
         EXECUTE_EVERY_N_MS(AGENT_PING_INTERVAL_MS, {
             bool agentFound = (RMW_RET_OK == rmw_uros_ping_agent(AGENT_PING_TIMEOUT_MS, AGENT_PING_RETRIES));
             if (agentFound) {
-                Serial.println("[microROS] Agent found → AGENT_AVAILABLE");
+                // 🛠️ ลบ Serial.println ทิ้งทั้งหมด ป้องกัน Data Corrupt
                 agentState = AgentState::AGENT_AVAILABLE;
             }
         });
         break;
 
-    // ── Available: try to create entities ───────────────────────────────────
     case AgentState::AGENT_AVAILABLE:
         if (createEntities()) {
-            Serial.println("[microROS] Entities created → AGENT_CONNECTED");
             agentState = AgentState::AGENT_CONNECTED;
-            prev_cmd_time = millis(); // reset command watchdog
+            prev_cmd_time = millis(); 
         } else {
-            Serial.println("[microROS] Failed to create entities → retry");
             destroyEntities();
             agentState = AgentState::WAITING_AGENT;
         }
         break;
 
-    // ── Connected: spin executor, health-check, command watchdog ────────────
     case AgentState::AGENT_CONNECTED:
-
-        // Command-loss watchdog: stop motors if no cmd received recently
         if ((millis() - prev_cmd_time) > CMD_TIMEOUT_MS) {
             fullStop();
         }
 
-        // Periodic liveness check
         EXECUTE_EVERY_N_MS(HEALTH_CHECK_INTERVAL_MS, {
             bool alive = (RMW_RET_OK == rmw_uros_ping_agent(AGENT_PING_TIMEOUT_MS, AGENT_PING_RETRIES));
             if (!alive) {
-                Serial.println("[microROS] Agent lost → AGENT_DISCONNECTED");
                 agentState = AgentState::AGENT_DISCONNECTED;
             }
         });
 
         if (agentState == AgentState::AGENT_CONNECTED) {
-            rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100));
+            // 🛠️ ปรับ Timeout spin ให้สมดุล (10ms กำลังดี)
+            rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
         }
         break;
 
-    // ── Disconnected: clean up, wait backoff, retry ──────────────────────────
     case AgentState::AGENT_DISCONNECTED:
-        fullStop(); // safety first
+        fullStop(); 
         destroyEntities();
-        Serial.println("[microROS] Cleaned up, waiting before reconnect...");
         agentState = AgentState::WAITING_AGENT;
-        // Brief blocking backoff to prevent rapid reconnect spam
         delay(RECONNECT_BACKOFF_MS);
         break;
 
@@ -234,12 +221,12 @@ void twistCallback(const void *msgin)
     const geometry_msgs__msg__Twist *msg =
         reinterpret_cast<const geometry_msgs__msg__Twist *>(msgin);
 
-    prev_cmd_time = millis(); // reset watchdog
+    prev_cmd_time = millis(); 
 
-    motor_msg.linear.x  = msg->linear.x;   // FL rpm
-    motor_msg.linear.y  = msg->linear.y;   // FR rpm
-    motor_msg.angular.x = msg->angular.x;  // RL rpm
-    motor_msg.angular.y = msg->angular.y;  // RR rpm
+    motor_msg.linear.x  = msg->linear.x;   
+    motor_msg.linear.y  = msg->linear.y;   
+    motor_msg.angular.x = msg->angular.x;  
+    motor_msg.angular.y = msg->angular.y;  
 }
 
 // ─────────────────────────────────────────────
@@ -305,7 +292,7 @@ bool destroyEntities()
 
     RCSOFTCHECK(rcl_publisher_fini(&debug_motor_publisher, &node));
     RCSOFTCHECK(rcl_publisher_fini(&encoder_publisher,     &node));
-    RCSOFTCHECK(rcl_subscription_fini(&motor_subscriber,  &node)); // was missing!
+    RCSOFTCHECK(rcl_subscription_fini(&motor_subscriber,  &node));
     RCSOFTCHECK(rcl_timer_fini(&control_timer));
     RCSOFTCHECK(rclc_executor_fini(&executor));
     RCSOFTCHECK(rcl_node_fini(&node));
@@ -321,10 +308,10 @@ bool destroyEntities()
 // ─────────────────────────────────────────────
 void moveMotors()
 {
-    DriveMotor(motor_msg.linear.x,  MAX_RPM, PWM_CHANNEL_AIN1, PWM_CHANNEL_AIN2); // FL
-    DriveMotor(motor_msg.linear.y,  MAX_RPM, PWM_CHANNEL_BIN1, PWM_CHANNEL_BIN2); // FR
-    DriveMotor(motor_msg.angular.x, MAX_RPM, PWM_CHANNEL_CIN1, PWM_CHANNEL_CIN2); // RL
-    DriveMotor(motor_msg.angular.y, MAX_RPM, PWM_CHANNEL_DIN1, PWM_CHANNEL_DIN2); // RR
+    DriveMotor(motor_msg.linear.x,  MAX_RPM, PWM_CHANNEL_AIN1, PWM_CHANNEL_AIN2); 
+    DriveMotor(motor_msg.linear.y,  MAX_RPM, PWM_CHANNEL_BIN1, PWM_CHANNEL_BIN2); 
+    DriveMotor(motor_msg.angular.x, MAX_RPM, PWM_CHANNEL_CIN1, PWM_CHANNEL_CIN2); 
+    DriveMotor(motor_msg.angular.y, MAX_RPM, PWM_CHANNEL_DIN1, PWM_CHANNEL_DIN2); 
 
     debug_motor_msg.linear.x  = constrain(motor_msg.linear.x,  -MAX_RPM, MAX_RPM);
     debug_motor_msg.linear.y  = constrain(motor_msg.linear.y,  -MAX_RPM, MAX_RPM);
@@ -378,9 +365,6 @@ struct timespec getTime()
     return tp;
 }
 
-// ─────────────────────────────────────────────
-//  Status LED: blink pattern reflects state
-// ─────────────────────────────────────────────
 void statusLED(AgentState s)
 {
     static unsigned long lastBlink = 0;
@@ -388,10 +372,10 @@ void statusLED(AgentState s)
     unsigned long period = 0;
 
     switch (s) {
-        case AgentState::WAITING_AGENT:      period = 1000; break; // slow blink
-        case AgentState::AGENT_AVAILABLE:    period = 200;  break; // fast blink
-        case AgentState::AGENT_CONNECTED:    period = 0;    break; // solid on
-        case AgentState::AGENT_DISCONNECTED: period = 100;  break; // very fast blink
+        case AgentState::WAITING_AGENT:      period = 1000; break; 
+        case AgentState::AGENT_AVAILABLE:    period = 200;  break; 
+        case AgentState::AGENT_CONNECTED:    period = 0;    break; 
+        case AgentState::AGENT_DISCONNECTED: period = 100;  break; 
     }
 
     if (period == 0) {
@@ -406,9 +390,6 @@ void statusLED(AgentState s)
     }
 }
 
-// ─────────────────────────────────────────────
-//  Fatal error loop
-// ─────────────────────────────────────────────
 void rclErrorLoop()
 {
     fullStop();

@@ -23,13 +23,13 @@ def main():
             msg.linear.x = 90.0
             #msg.linear.z = 0.0
             pub.publish(msg)
-            time.sleep(2)
+            time.sleep(5)
 
             print("Servo 1: เก็บแขน 180 องศา")
             msg.linear.x = 180.0
             #msg.linear.z = 100.0
             pub.publish(msg)
-            time.sleep(2)
+            time.sleep(5)
     except KeyboardInterrupt:
         pass
     finally:

@@ -51,7 +51,7 @@ ROBOT ORIENTATION
 #define SERVO4_PIN 19 //เจาะดิน360
 
 // Ultrasonics
-#define TRIG_F 16
+#define TRIG_F 16  
 #define ECHO_F 17  // Changed from 17 to avoid conflict with DIR_PIN
 #define TRIG_R 5
 #define ECHO_R 18

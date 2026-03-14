@@ -12,7 +12,7 @@ def main():
     # เซ็ตตัวอื่นให้เป็นค่ากลาง (90) เพื่อไม่ให้ขยับมั่ว
     
     msg.linear.x = 90.0
-    msg.linear.y = 90.0
+    msg.linear.y = 180.0
     #msg.linear.z = 90.0
     msg.angular.x = 90.0
 
@@ -25,7 +25,7 @@ def main():
             time.sleep(2)
 
             print("Servo 1: เก็บแขน 100 องศา")
-            msg.linear.z = 100.0
+            msg.linear.z = 180.0
             pub.publish(msg)
             time.sleep(2)
     except KeyboardInterrupt:

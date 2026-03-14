@@ -13,7 +13,7 @@ def main():
     # ตั้ง servo อื่นให้นิ่ง
     msg.linear.x = 90.0
     #msg.linear.y = 90.0
-    msg.linear.z = 90.0
+    msg.linear.z = 180.0
     msg.angular.x = 90.0
 
     try:

@@ -10,7 +10,7 @@ class TestStepper(Node):
         self.pub = self.create_publisher(Twist, '/galum/stepper/angle', 10)
         
         self.is_cw = True
-        self.pulses = 800.0  # จำนวนพัลส์ที่ต้องการเทส (เปลี่ยนค่าได้)
+        self.pulses = 350.0  # จำนวนพัลส์ที่ต้องการเทส (เปลี่ยนค่าได้)
         
         # ส่งคำสั่งทุกๆ 3 วินาที (ต้องเผื่อเวลาให้มอเตอร์หมุนเสร็จด้วย)
         self.create_timer(3.0, self.timer_callback)
