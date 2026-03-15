@@ -56,7 +56,7 @@ setup(
             # 'complot= galum_robot.com_camera_plot:main',
             # 'testrun= galum_robot.test_turnin:main',
             'runcamera = galum_robot.send_camera:main',
-            'runstate = galum_robot.test2:main' ,
+            'runstate = galum_robot.run_pi_state_done:main' ,
             'runcom = galum_robot.com_add_cabbage:main' ,
         ],
     },

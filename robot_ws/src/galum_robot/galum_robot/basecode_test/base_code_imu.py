@@ -73,9 +73,9 @@ class RobotMaster(Node):
         # ─────────────────────────────────────────────────────
         #  Configuration: Turning Angles (Degrees)
         # ─────────────────────────────────────────────────────
-        self.CFG_TURN_ANGLE_MODE1  = -55.0  # องศาที่เลี้ยวตอนเจอ Tag ใน Mode 1 (Right)   #middle -60 #-right -55
+        self.CFG_TURN_ANGLE_MODE1  = -55.0  # องศาที่เลี้ยวตอนเจอ Tag ใน Mode 1 (Right)
         self.CFG_TURN_ANGLE_MODE2  = -50.0  # องศาที่เลี้ยวตอนเจอ Tag ใน Mode 2 (Left)
-        self.CFG_TURN_BACK_ANGLE   = 15.0   # องศาตอนตั้งลำกลับหลังเดินหน้าเสร็จ             #middle 15 #right  20
+        self.CFG_TURN_BACK_ANGLE   = 30.0   # องศาตอนตั้งลำกลับหลังเดินหน้าเสร็จ
         self.forward_after_turnr   = 0.40   # ระยะเดินหลังหมุนขวา
         
         # ── Ultrasonic Config ──
@@ -108,8 +108,6 @@ class RobotMaster(Node):
         self.US_FILTER_N = 5
         self.lost_wall_count = 0
         self.current_avg_dist = 0.0 
-        
-        self.back_tag_x_ratio = 0.5
         
         self.tag_found = False; self.tag_err = 0.0; self.current_z_dist = 0.0
         self.back_tag_found = False; self.back_tag_y_ratio = 1.0; self.back_tag_threshold = 0.75
@@ -186,7 +184,6 @@ class RobotMaster(Node):
         self.current_z_dist = d[7] if len(d) > 7 else 0.0
         self.back_tag_found = (d[12] == 1.0); self.back_tag_y_ratio = d[13] if len(d) > 13 else 1.0
         self.cabbage_diameter = d[14] if len(d) > 14 else 0.0
-        self.back_tag_x_ratio = d[15] if len(d) > 15 else 0.5
 
     def encoder_cb(self, msg):
         curr = [msg.linear.x, msg.linear.y, msg.angular.x, msg.angular.y]
@@ -384,108 +381,49 @@ class RobotMaster(Node):
 
         elif self.state == STATE_BACK_TO_TAG:
             back_speed = -self.walk_speed * 0.5
+            
+            # สั่งให้ถอยหลังตีคู่กำแพงตลอดเวลาที่อยู่ใน State นี้
             left_rpm, right_rpm = self._get_reverse_rpm(back_speed)
 
             if time.monotonic() - self.back_start_time > 2.0:
-                # 📌 เป้าหมาย: ถอยจนกว่า Tag จะมาอยู่ฝั่งซ้ายของจอ (ค่า X เขยิบเข้าใกล้ 0)
-                TARGET_X_RATIO = 0.5
+                # 📌 กำหนดตำแหน่งแกน Y ที่ต้องการให้หยุด (0.0=บนสุด, 1.0=ขอบล่างสุด)
+                # จากรูปที่ 2 Tag เลื่อนลงมาค่อนข้างต่ำ ลองตั้งเป้าไว้ที่ 0.80 ก่อนครับ
+                TARGET_Y_RATIO = 0.80  
                 
                 if self.back_tag_found:
+                    # แปะ Flag ไว้ว่า "เราเคยเห็น Tag แล้วนะ"
                     self.has_seen_back_tag = True 
-                    self.last_seen_x_ratio = self.back_tag_x_ratio  # 📌 จำพิกัดล่าสุดไว้!
                     
-                    if self.back_tag_x_ratio <= TARGET_X_RATIO:
-                        self.get_logger().info(f"🎯 Reached Tag Target Position! (X: {self.back_tag_x_ratio:.2f})")
+                    # ถ้า Tag เลื่อนลงมาถึงตำแหน่งในรูปที่ 2 แล้ว ให้หยุด!
+                    if self.back_tag_y_ratio >= TARGET_Y_RATIO:
+                        self.get_logger().info(f"🎯 Reached Tag Target Position! (Y: {self.back_tag_y_ratio:.2f})")
                         self.send_rpm(0, 0)
-                        self.sequence_steps = [self.plant_dist_m, self.plant_dist_m, self.plant_gap_m+0.03, self.plant_interval_m +0.05, self.plant_interval_m+0.05 ,self.plant_interval_m+0.05]
-                        self.get_logger().info(f"📋 Sequence: dist={self.plant_dist_m}m, gap={self.plant_gap_m}m, interval={self.plant_interval_m}m")
+                        self.sequence_steps = [self.plant_dist_m, self.plant_dist_m, self.plant_gap_m, self.plant_interval_m, self.plant_interval_m, self.plant_interval_m]
                         self._set_scan_mode(0.0)
                         self.total_dist = 0.0
                         self.current_step_index = 0
+                        self.pause_start_time = time.monotonic()
                         
-                        # ✅ แก้ตรงนี้: ให้วิ่งไปถอยหลัง Blind ต่อ 
-                        self.state = STATE_BACK_BLIND
+                        # 🚀 ข้ามโหมดถอยตาบอด ไปเข้า Sequence ปลูกเลย
+                        self.state = STATE_PAUSE_BEFORE_SEQUENCE
                         
                 elif getattr(self, 'has_seen_back_tag', False):
-                    # 🛡️ กันเหนียว: เช็คว่าตอนที่ภาพหายไป Tag ใกล้จะถึงจุดหมายหรือยัง
-                    if getattr(self, 'last_seen_x_ratio', 1.0) <= TARGET_X_RATIO + 0.15: 
-                        self.get_logger().info("⚠️ Tag dropped out of left view! Stopping just in case.")
-                        self.send_rpm(0, 0)
-                        self.sequence_steps = [self.plant_dist_m, self.plant_dist_m, self.plant_gap_m+0.03, self.plant_interval_m+0.05, self.plant_interval_m+0.05 ,self.plant_interval_m+0.05]
-                        self._set_scan_mode(0.0)
-                        self.total_dist = 0.0
-                        self.current_step_index = 0
-                        
-                        self.state = STATE_BACK_BLIND
-                    else:
-                        pass # 📌 ถ้า Tag ยังอยู่ขวาๆ แล้วหายไป แปลว่าแค่กล้องกระพริบ มอเตอร์จะไม่หยุด!
-        
-        elif self.state == STATE_BACK_BLIND:
-            # ✅ ถอยหลังแบบ Blind (ตอนนีัตั้งไว้ 30 cm ถ้าจะเอา 3 cm ให้แก้ 0.30 เป็น 0.03)
-            if abs(self.total_dist) < 0.08:   
-                rpm = self._m_s_to_rpm(-self.walk_speed * 0.5)
-                left_rpm, right_rpm = rpm, rpm
-            else:
-                self.send_rpm(0, 0)
-                self.total_dist = 0.0
-                self.current_step_index = 0
-                self.pause_start_time = time.monotonic()
-                self.state = STATE_PAUSE_BEFORE_SEQUENCE
-        # elif self.state == STATE_BACK_TO_TAG:
-        #     back_speed = -self.walk_speed * 0.5
-        #     left_rpm, right_rpm = self._get_reverse_rpm(back_speed)
+                    # 🛡️ กันเหนียว: ถ้าเคยเห็น Tag แล้ว (รูป 1) แต่อยู่ๆ มันหลุดขอบจอด้านล่างไป (มองไม่เห็นแล้ว)
+                    # แสดงว่าถอยมาลึกเกินไปแล้ว ให้รีบเบรกแล้วเริ่มปลูกเลย
+                    self.get_logger().info("⚠️ Tag dropped out of view! Stopping just in case.")
+                    self.send_rpm(0, 0)
+                    self.sequence_steps = [self.plant_dist_m, self.plant_dist_m, self.plant_gap_m, self.plant_interval_m, self.plant_interval_m, self.plant_interval_m]
+                    self._set_scan_mode(0.0)
+                    self.total_dist = 0.0
+                    self.current_step_index = 0
+                    self.pause_start_time = time.monotonic()
+                    self.state = STATE_PAUSE_BEFORE_SEQUENCE
 
-        #     if time.monotonic() - self.back_start_time > 2.0:
-        #         # 📌 เป้าหมาย: ถอยจนกว่า Tag จะมาอยู่ฝั่งซ้ายของจอ (ค่า X เขยิบเข้าใกล้ 0)
-        #         TARGET_X_RATIO = 0.4
-                
-        #         if self.back_tag_found:
-        #             self.has_seen_back_tag = True 
-        #             self.last_seen_x_ratio = self.back_tag_x_ratio  # 📌 จำพิกัดล่าสุดไว้!
-                    
-        #             if self.back_tag_x_ratio <= TARGET_X_RATIO:
-        #                 self.get_logger().info(f"🎯 Reached Tag Target Position! (X: {self.back_tag_x_ratio:.2f})")
-        #                 self.send_rpm(0, 0)
-        #                 self.sequence_steps = [self.plant_dist_m, self.plant_dist_m, self.plant_gap_m, self.plant_interval_m , self.plant_interval_m ,self.plant_interval_m]
-        #                 self.get_logger().info(f"📋 Sequence (Fail-safe): dist={self.plant_dist_m}m, gap={self.plant_gap_m}m, interval={self.plant_interval_m}m")
-        #                 self._set_scan_mode(0.0)
-        #                 self.total_dist = 0.0
-        #                 self.current_step_index = 0
-        #                 self.pause_start_time = time.monotonic()
-                        
-        #                 self.state = STATE_PAUSE_BEFORE_SEQUENCE
-                        
-        #         elif getattr(self, 'has_seen_back_tag', False):
-        #             # 🛡️ กันเหนียวที่ฉลาดขึ้น: เช็คว่าตอนที่ภาพหายไป Tag ใกล้จะถึงจุดหมายหรือยัง
-        #             if getattr(self, 'last_seen_x_ratio', 1.0) <= TARGET_X_RATIO + 0.15: 
-        #                 self.get_logger().info("⚠️ Tag dropped out of left view! Stopping just in case.")
-        #                 self.send_rpm(0, 0)
-        #                 self.sequence_steps = [self.plant_dist_m, self.plant_dist_m, self.plant_gap_m, self.plant_interval_m, self.plant_interval_m ,self.plant_interval_m]
-        #                 self.get_logger().info(f"📋 Sequence (Fail-safe): dist={self.plant_dist_m}m, gap={self.plant_gap_m}m, interval={self.plant_interval_m}m")
-        #                 self._set_scan_mode(0.0)
-        #                 self.total_dist = 0.0
-        #                 self.current_step_index = 0
-        #                 self.pause_start_time = time.monotonic()
-        #                 #self.state = STATE_PAUSE_BEFORE_SEQUENCE
-        #                 self.state = STATE_BACK_BLIND
-        #             else:
-        #                 pass # 📌 ถ้า Tag ยังอยู่ขวาๆ แล้วหายไป แปลว่าแค่กล้องกระพริบ มอเตอร์จะไม่หยุด!
+        # 🗑️ หมายเหตุ: ไม่ต้องมี elif self.state == STATE_BACK_BLIND: แล้วนะครับ ลบทิ้งได้เลย
         
-        elif self.state == STATE_BACK_BLIND:
-            # ถอยหลังแบบ Blind เป็นระยะทาง 3 cm (0.03 เมตร)
-            if abs(self.total_dist) < 0.30:
-                rpm = self._m_s_to_rpm(-self.walk_speed * 0.5)
-                left_rpm, right_rpm = rpm, rpm
-            else:
-                self.send_rpm(0, 0)
-                self.total_dist = 0.0
-                self.current_step_index = 0
-                self.pause_start_time = time.monotonic()
-                self.state = STATE_PAUSE_BEFORE_SEQUENCE
-                
         elif self.state == STATE_PAUSE_BEFORE_SEQUENCE:
             if time.monotonic() - self.pause_start_time > 2.0:
-                if self.current_step_index >= 2: self._set_scan_mode(2.0)
+                if self.current_step_index >= 3: self._set_scan_mode(2.0)
                 self.state = STATE_RUN_SEQUENCE
 
         elif self.state == STATE_RUN_SEQUENCE:
@@ -583,7 +521,7 @@ class RobotMaster(Node):
 
         elif self.state == STATE_PAUSE_SEQUENCE:
             elapsed = time.monotonic() - self.sequence_pause_start_time
-            if self.current_step_index >= 2 and 1.0 < elapsed < 2.0 and not self.logged_cabbage:
+            if self.current_step_index >= 3 and 1.0 < elapsed < 2.0 and not self.logged_cabbage:
                 self.get_logger().info(f"🟢 Cabbage {self.current_step_index-2}: {self.cabbage_diameter:.2f}cm")
                 self.logged_cabbage = True; msg = String(); msg.data = f"cabbage_{self.current_step_index-2}.jpg"; self.save_img_pub.publish(msg)
             if elapsed > 2.0:
